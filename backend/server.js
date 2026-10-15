@@ -3,6 +3,8 @@ const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
 
+const pool = require("./db");
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -10,33 +12,43 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-// Temporary debt records for testing
-const debts = [
-  {
-    id: 1,
-    name: "Juan Dela Cruz",
-    amount: 1500,
-    date: "2026-10-12",
-    description: "School expenses",
-    status: "Unpaid"
-  },
-  {
-    id: 2,
-    name: "Maria Santos",
-    amount: 800,
-    date: "2026-10-11",
-    description: "Food expenses",
-    status: "Unpaid"
-  }
-];
+// Home route
+app.get("/", (req, res) => {
+  res.send("Utang Tracking System API is running!");
+});
 
-// GET API: Retrieve all debt records
-app.get("/api/debts", (req, res) => {
-  res.status(200).json({
-    success: true,
-    count: debts.length,
-    data: debts
-  });
+// GET API: Retrieve debt records from PostgreSQL
+app.get("/api/debts", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        debts.debt_id,
+        customers.first_name,
+        customers.last_name,
+        debts.amount,
+        debts.description,
+        debts.debt_date,
+        debts.due_date,
+        debts.status
+      FROM debts
+      INNER JOIN customers
+        ON debts.customer_id = customers.customer_id
+      ORDER BY debts.debt_id DESC
+    `);
+
+    res.status(200).json({
+      success: true,
+      count: result.rows.length,
+      data: result.rows
+    });
+  } catch (error) {
+    console.error("Error retrieving debts:", error.message);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to retrieve debt records."
+    });
+  }
 });
 
 // Start the server
