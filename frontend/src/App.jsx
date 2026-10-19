@@ -1,10 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import "./App.css";
-
-const initialCustomers = [
-  { id: 1, name: "Juan Dela Cruz", phone: "09171234567", address: "Maasin City" },
-  { id: 2, name: "Maria Santos", phone: "09981234567", address: "Macrohon, Southern Leyte" },
-];
 
 const initialDebts = [
   { id: 1, customerId: 1, customer: "Juan Dela Cruz", amount: 1500, description: "School expenses", date: "2026-10-14", due: "2026-10-21", status: "Unpaid", paid: 0 },
@@ -17,9 +12,12 @@ const money = (amount) =>
     currency: "PHP",
   }).format(amount);
 
+const API_URL = "http://localhost:5000/api";
+
 function App() {
   const [page, setPage] = useState("Dashboard");
-  const [customers, setCustomers] = useState(initialCustomers);
+  const [customers, setCustomers] = useState([]);
+  const [customersLoading, setCustomersLoading] = useState(true);
   const [debts, setDebts] = useState(initialDebts);
   const [payments, setPayments] = useState([
     { id: 1, customer: "Maria Santos", description: "Personal loan", amount: 200, date: "2026-10-16" },
@@ -36,20 +34,81 @@ function App() {
     window.setTimeout(() => setMessage(""), 3000);
   }
 
-  function addCustomer(event) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
+  // Load customers from the PostgreSQL database through Express.
+  async function loadCustomers() {
+    try {
+      const response = await fetch(`${API_URL}/customers`);
+      const result = await response.json();
 
-    const customer = {
-      id: Date.now(),
-      name: `${form.get("firstName").trim()} ${form.get("lastName").trim()}`,
-      phone: form.get("phone").trim(),
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Failed to load customers.");
+      }
+
+      const formattedCustomers = result.data.map((customer) => ({
+        id: customer.customer_id,
+        name: `${customer.first_name} ${customer.last_name}`,
+        phone: customer.contact_number || "",
+        address: customer.address || "",
+      }));
+
+      setCustomers(formattedCustomers);
+    } catch (error) {
+      notify(`Could not load customers: ${error.message}`);
+    } finally {
+      setCustomersLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadCustomers();
+  }, []);
+
+  // Save a new customer to PostgreSQL.
+  async function addCustomer(event) {
+    event.preventDefault();
+
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+
+    const customerData = {
+      first_name: form.get("firstName").trim(),
+      last_name: form.get("lastName").trim(),
+      contact_number: form.get("phone").trim(),
       address: form.get("address").trim(),
     };
 
-    setCustomers((current) => [...current, customer]);
-    event.currentTarget.reset();
-    notify("Customer added to this demo session.");
+    try {
+      const response = await fetch(`${API_URL}/customers`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(customerData),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Failed to register customer.");
+      }
+
+      const savedCustomer = result.data;
+
+      setCustomers((current) => [
+        {
+          id: savedCustomer.customer_id,
+          name: `${savedCustomer.first_name} ${savedCustomer.last_name}`,
+          phone: savedCustomer.contact_number || "",
+          address: savedCustomer.address || "",
+        },
+        ...current,
+      ]);
+
+      formElement.reset();
+      notify("Customer saved successfully to PostgreSQL.");
+    } catch (error) {
+      notify(`Could not save customer: ${error.message}`);
+    }
   }
 
   function addDebt(event) {
@@ -192,7 +251,7 @@ function App() {
           </div>
           <div className="demo-badge">
             <span className="status-dot" />
-            Demo mode
+            Customer API connected
           </div>
         </header>
 
@@ -241,6 +300,7 @@ function App() {
           {page === "Customers" && (
             <>
               <PageIntro title="Customer management" subtitle="Register customers and manage their contact information." />
+
               <section className="panel form-panel">
                 <h2>Register a customer</h2>
                 <form className="form-grid" onSubmit={addCustomer}>
@@ -256,16 +316,30 @@ function App() {
                 <PanelSearch title="Customer list" count={filteredCustomers.length} search={search} setSearch={setSearch} />
                 <div className="table-wrap">
                   <table>
-                    <thead><tr><th>Customer</th><th>Contact number</th><th>Address</th></tr></thead>
+                    <thead>
+                      <tr>
+                        <th>Customer</th>
+                        <th>Contact number</th>
+                        <th>Address</th>
+                      </tr>
+                    </thead>
                     <tbody>
-                      {filteredCustomers.map((customer) => (
-                        <tr key={customer.id}>
-                          <td><strong>{customer.name}</strong></td>
-                          <td>{customer.phone || "—"}</td>
-                          <td>{customer.address || "—"}</td>
+                      {customersLoading ? (
+                        <tr>
+                          <td colSpan={3} className="empty-state">Loading customers...</td>
                         </tr>
-                      ))}
-                      {filteredCustomers.length === 0 && <EmptyRow columns={3} />}
+                      ) : (
+                        <>
+                          {filteredCustomers.map((customer) => (
+                            <tr key={customer.id}>
+                              <td><strong>{customer.name}</strong></td>
+                              <td>{customer.phone || "—"}</td>
+                              <td>{customer.address || "—"}</td>
+                            </tr>
+                          ))}
+                          {filteredCustomers.length === 0 && <EmptyRow columns={3} />}
+                        </>
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -283,7 +357,9 @@ function App() {
                     <span>Customer *</span>
                     <select name="customerId" required defaultValue="">
                       <option value="" disabled>Select a customer</option>
-                      {customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}
+                      {customers.map((customer) => (
+                        <option key={customer.id} value={customer.id}>{customer.name}</option>
+                      ))}
                     </select>
                   </label>
                   <Field label="Amount (₱)" name="amount" type="number" min="0.01" step="0.01" required placeholder="0.00" />
@@ -333,7 +409,14 @@ function App() {
                 <PanelSearch title="Payment history" count={filteredPayments.length} search={search} setSearch={setSearch} />
                 <div className="table-wrap">
                   <table>
-                    <thead><tr><th>Customer</th><th>Description</th><th>Payment date</th><th>Amount</th></tr></thead>
+                    <thead>
+                      <tr>
+                        <th>Customer</th>
+                        <th>Description</th>
+                        <th>Payment date</th>
+                        <th>Amount</th>
+                      </tr>
+                    </thead>
                     <tbody>
                       {filteredPayments.map((payment) => (
                         <tr key={payment.id}>
@@ -351,7 +434,7 @@ function App() {
             </>
           )}
 
-          <footer className="footer">UtangTrack · Utang Tracking System · React interface prototype</footer>
+          <footer className="footer">UtangTrack · Utang Tracking System · React interface</footer>
         </div>
       </main>
     </div>
@@ -393,7 +476,16 @@ function DebtTable({ debts }) {
   return (
     <div className="table-wrap">
       <table>
-        <thead><tr><th>Customer</th><th>Description</th><th>Debt amount</th><th>Balance</th><th>Due date</th><th>Status</th></tr></thead>
+        <thead>
+          <tr>
+            <th>Customer</th>
+            <th>Description</th>
+            <th>Debt amount</th>
+            <th>Balance</th>
+            <th>Due date</th>
+            <th>Status</th>
+          </tr>
+        </thead>
         <tbody>
           {debts.map((debt) => (
             <tr key={debt.id}>
