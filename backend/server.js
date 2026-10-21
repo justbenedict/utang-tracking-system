@@ -206,12 +206,92 @@ app.delete("/api/customers/:id", async (req, res) => {
   }
 });
 
+
+/* POST: Save a debt record to PostgreSQL */
+app.post("/api/debts", async (req, res) => {
+  try {
+    const {
+      customer_id,
+      amount,
+      description,
+      debt_date,
+      due_date
+    } = req.body;
+
+    const customerId = Number(customer_id);
+    const debtAmount = Number(amount);
+
+    if (!Number.isInteger(customerId) || customerId < 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Please select a valid customer."
+      });
+    }
+
+    if (!Number.isFinite(debtAmount) || debtAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Debt amount must be greater than zero."
+      });
+    }
+
+    if (
+      typeof description !== "string" ||
+      !description.trim() ||
+      typeof debt_date !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(debt_date)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "A description and valid debt date are required."
+      });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO debts
+        (customer_id, amount, description, debt_date, due_date, status)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [
+        customerId,
+        debtAmount,
+        description.trim(),
+        debt_date,
+        due_date || null,
+        "Unpaid"
+      ]
+    );
+
+    res.status(201).json({
+      success: true,
+      message: "Debt saved successfully.",
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error("Error saving debt:", error.message);
+
+    if (error.code === "23503") {
+      return res.status(400).json({
+        success: false,
+        message: "The selected customer does not exist."
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to save debt record."
+    });
+  }
+});
+
+
 // GET API: Retrieve debt records from PostgreSQL
 app.get("/api/debts", async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT
         debts.debt_id,
+        debts.customer_id,
         customers.first_name,
         customers.last_name,
         debts.amount,

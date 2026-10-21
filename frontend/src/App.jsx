@@ -1,10 +1,7 @@
 import { useEffect, useState } from "react";
 import "./App.css";
 
-const initialDebts = [
-  { id: 1, customerId: 1, customer: "Juan Dela Cruz", amount: 1500, description: "School expenses", date: "2026-10-14", due: "2026-10-21", status: "Unpaid", paid: 0 },
-  { id: 2, customerId: 2, customer: "Maria Santos", amount: 500, description: "Personal loan", date: "2026-10-15", due: "2026-10-25", status: "Partially Paid", paid: 200 },
-];
+
 
 const money = (amount) =>
   new Intl.NumberFormat("en-PH", {
@@ -18,7 +15,8 @@ function App() {
   const [page, setPage] = useState("Dashboard");
   const [customers, setCustomers] = useState([]);
   const [customersLoading, setCustomersLoading] = useState(true);
-  const [debts, setDebts] = useState(initialDebts);
+  const [debts, setDebts] = useState([]);
+  const [debtsLoading, setDebtsLoading] = useState(true);
   const [payments, setPayments] = useState([
     { id: 1, customer: "Maria Santos", description: "Personal loan", amount: 200, date: "2026-10-16" },
   ]);
@@ -61,7 +59,39 @@ function App() {
 
   useEffect(() => {
     loadCustomers();
+    loadDebts();
   }, []);
+  
+  // Load saved debts from PostgreSQL through Express.
+  async function loadDebts() {
+    try {
+      const response = await fetch(`${API_URL}/debts`);
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Failed to load debts.");
+      }
+
+      const formattedDebts = result.data.map((debt) => ({
+        id: debt.debt_id,
+        customerId: debt.customer_id,
+        customer: `${debt.first_name} ${debt.last_name}`,
+        amount: Number(debt.amount),
+        description: debt.description,
+        date: debt.debt_date?.slice(0, 10) || "",
+        due: debt.due_date?.slice(0, 10) || "",
+        status: debt.status,
+        paid: 0,
+      }));
+
+      setDebts(formattedDebts);
+    } catch (error) {
+      notify(`Could not load debts: ${error.message}`);
+    } finally {
+      setDebtsLoading(false);
+    }
+  }
+
 
   // Save a new customer to PostgreSQL.
   async function addCustomer(event) {
@@ -111,9 +141,13 @@ function App() {
     }
   }
 
-  function addDebt(event) {
+  
+  async function addDebt(event) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+
     const customerId = Number(form.get("customerId"));
     const customer = customers.find((item) => item.id === customerId);
 
@@ -122,24 +156,46 @@ function App() {
       return;
     }
 
-    setDebts((current) => [
-      {
-        id: Date.now(),
-        customerId,
-        customer: customer.name,
-        amount: Number(form.get("amount")),
-        description: form.get("description").trim(),
-        date: form.get("date"),
-        due: form.get("due") || "",
-        status: "Unpaid",
-        paid: 0,
-      },
-      ...current,
-    ]);
+    const amount = Number(form.get("amount"));
+    const description = form.get("description").trim();
+    const date = form.get("date");
+    const due = form.get("due") || "";
 
-    event.currentTarget.reset();
-    notify("Debt added to this demo session.");
+    if (!Number.isFinite(amount) || amount <= 0 || !description || !date) {
+      notify("Please enter a valid amount, description, and debt date.");
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/debts`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          customer_id: customerId,
+          amount,
+          description,
+          debt_date: date,
+          due_date: due || null,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Failed to save debt.");
+      }
+
+      await loadDebts();
+
+      formElement.reset();
+      notify("Debt saved successfully to PostgreSQL.");
+    } catch (error) {
+      notify(`Could not save debt: ${error.message}`);
+    }
   }
+
 
   function addPayment(event) {
     event.preventDefault();
