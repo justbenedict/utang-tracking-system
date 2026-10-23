@@ -21,6 +21,8 @@ function App() {
   const [editingPayment, setEditingPayment] = useState(null);
   const [reportStartDate, setReportStartDate] = useState("");
   const [reportEndDate, setReportEndDate] = useState("");
+  const invalidReportDateRange =
+    reportStartDate && reportEndDate && reportStartDate > reportEndDate;
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
   const filteredReportDebts = debts.filter((debt) => {
@@ -40,6 +42,7 @@ function App() {
 
   // Find debts that are overdue and still have an unpaid balance.
   const today = new Date().toLocaleDateString("en-CA");
+  const reportAsOfDate = reportEndDate || today;
 
   const filteredReportPayments = payments.filter((payment) => {
     if (reportStartDate && payment.date < reportStartDate) return false;
@@ -57,15 +60,23 @@ function App() {
     0,
   );
 
+  const reportPaymentCount = filteredReportPayments.length;
+
   const reportOutstandingBalance = filteredReportDebts.reduce(
     (sum, debt) => sum + Math.max(0, debt.amount - debt.paid),
     0,
   );
 
   const reportOverdueBalance = filteredReportDebts.reduce((sum, debt) => {
-    const isOverdue = debt.due && debt.due < today && debt.amount > debt.paid;
+    const isOverdue =
+      debt.due && debt.due < reportAsOfDate && debt.amount > debt.paid;
+
     return sum + (isOverdue ? debt.amount - debt.paid : 0);
   }, 0);
+
+  const reportOverdueCount = filteredReportDebts.filter(
+    (debt) => debt.due && debt.due < reportAsOfDate && debt.amount > debt.paid,
+  ).length;
 
   const overdueDebts = debts.filter(
     (debt) => debt.due && debt.due < today && debt.amount > debt.paid,
@@ -1053,11 +1064,17 @@ function App() {
                   >
                     Clear dates
                   </button>
+                  {invalidReportDateRange && (
+                    <p className="form-error">
+                      Start date cannot be later than end date.
+                    </p>
+                  )}
                 </div>
 
                 <div className="panel report-actions">
                   <button
                     type="button"
+                    disabled={invalidReportDateRange}
                     className="primary-button"
                     onClick={() => window.print()}
                   >
@@ -1066,6 +1083,7 @@ function App() {
 
                   <button
                     type="button"
+                    disabled={invalidReportDateRange}
                     className="secondary-button"
                     onClick={() =>
                       exportCSV(
@@ -1102,6 +1120,7 @@ function App() {
 
                   <button
                     type="button"
+                    disabled={invalidReportDateRange}
                     className="secondary-button"
                     onClick={() =>
                       exportCSV(
@@ -1142,6 +1161,12 @@ function App() {
                 />
 
                 <StatCard
+                  label="Payment Transactions"
+                  value={reportPaymentCount}
+                  icon="▤"
+                />
+
+                <StatCard
                   label="Outstanding Balance"
                   value={money(reportOutstandingBalance)}
                   detail="Current balance of filtered debts"
@@ -1151,6 +1176,12 @@ function App() {
                   label="Overdue Balance"
                   value={money(reportOverdueBalance)}
                   detail="Overdue balance of filtered debts"
+                />
+
+                <StatCard
+                  label="Overdue Debt Records"
+                  value={reportOverdueCount}
+                  detail="Overdue debts in the selected period"
                 />
               </div>
 
@@ -1162,7 +1193,7 @@ function App() {
                   </div>
                 </div>
 
-                <DebtTable debts={filteredReportDebts} today={today} />
+                <DebtTable debts={filteredReportDebts} today={reportAsOfDate} />
               </div>
             </div>
           )}
