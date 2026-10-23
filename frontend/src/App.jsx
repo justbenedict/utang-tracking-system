@@ -15,6 +15,7 @@ function App() {
   const [page, setPage] = useState("Dashboard");
   const [customers, setCustomers] = useState([]);
   const [customersLoading, setCustomersLoading] = useState(true);
+  const [editingCustomer, setEditingCustomer] = useState(null);
   const [debts, setDebts] = useState([]);
   const [debtsLoading, setDebtsLoading] = useState(true);
   const [payments, setPayments] = useState([]);
@@ -42,6 +43,8 @@ function App() {
 
       const formattedCustomers = result.data.map((customer) => ({
         id: customer.customer_id,
+        firstName: customer.first_name,
+        lastName: customer.last_name,
         name: `${customer.first_name} ${customer.last_name}`,
         phone: customer.contact_number || "",
         address: customer.address || "",
@@ -121,53 +124,87 @@ async function loadPayments() {
 
 
   // Save a new customer to PostgreSQL.
-  async function addCustomer(event) {
-    event.preventDefault();
+  
+async function addCustomer(event) {
+  event.preventDefault();
 
-    const formElement = event.currentTarget;
-    const form = new FormData(formElement);
+  const formElement = event.currentTarget;
+  const form = new FormData(formElement);
 
-    const customerData = {
-      first_name: form.get("firstName").trim(),
-      last_name: form.get("lastName").trim(),
-      contact_number: form.get("phone").trim(),
-      address: form.get("address").trim(),
-    };
+  const customerData = {
+    first_name: form.get("firstName").trim(),
+    last_name: form.get("lastName").trim(),
+    contact_number: form.get("phone").trim(),
+    address: form.get("address").trim(),
+  };
 
-    try {
-      const response = await fetch(`${API_URL}/customers`, {
-        method: "POST",
+  const isEditing = editingCustomer !== null;
+
+  try {
+    const response = await fetch(
+      isEditing
+        ? `${API_URL}/customers/${editingCustomer.id}`
+        : `${API_URL}/customers`,
+      {
+        method: isEditing ? "PUT" : "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(customerData),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok || !result.success) {
-        throw new Error(result.message || "Failed to register customer.");
       }
+    );
 
-      const savedCustomer = result.data;
+    const result = await response.json();
 
+    if (!response.ok || !result.success) {
+      throw new Error(result.message || "Failed to save customer.");
+    }
+
+    const savedCustomer = result.data;
+
+    const formattedCustomer = {
+      id: savedCustomer.customer_id,
+      firstName: savedCustomer.first_name,
+      lastName: savedCustomer.last_name,
+      name: `${savedCustomer.first_name} ${savedCustomer.last_name}`,
+      phone: savedCustomer.contact_number || "",
+      address: savedCustomer.address || "",
+    };
+
+    if (isEditing) {
+      setCustomers((current) =>
+        current.map((customer) =>
+          customer.id === formattedCustomer.id
+            ? formattedCustomer
+            : customer
+        )
+      );
+    } else {
       setCustomers((current) => [
-        {
-          id: savedCustomer.customer_id,
-          name: `${savedCustomer.first_name} ${savedCustomer.last_name}`,
-          phone: savedCustomer.contact_number || "",
-          address: savedCustomer.address || "",
-        },
+        formattedCustomer,
         ...current,
       ]);
-
-      formElement.reset();
-      notify("Customer saved successfully to PostgreSQL.");
-    } catch (error) {
-      notify(`Could not save customer: ${error.message}`);
     }
-  }
 
+    setEditingCustomer(null);
+    formElement.reset();
+
+    notify(
+      isEditing
+        ? "Customer updated successfully."
+        : "Customer registered successfully."
+    );
+  } catch (error) {
+    notify(`Could not save customer: ${error.message}`);
+  }
+}
+
+function startEditingCustomer(customer) {
+  setEditingCustomer(customer);
+  setPage("Customers");
+  setSearch("");
+  setMessage("");
+}
   
   async function addDebt(event) {
     event.preventDefault();
@@ -398,14 +435,38 @@ async function addPayment(event) {
               <PageIntro title="Customer management" subtitle="Register customers and manage their contact information." />
 
               <section className="panel form-panel">
-                <h2>Register a customer</h2>
-                <form className="form-grid" onSubmit={addCustomer}>
-                  <Field label="First name" name="firstName" required placeholder="e.g. Juan" />
-                  <Field label="Last name" name="lastName" required placeholder="e.g. Dela Cruz" />
-                  <Field label="Contact number" name="phone" placeholder="09XXXXXXXXX" />
-                  <Field label="Address" name="address" placeholder="City or barangay" />
-                  <button className="primary-button form-submit" type="submit">＋ Add customer</button>
-                </form>
+                <h2>{editingCustomer ? "Edit customer" : "Register a customer"}</h2>
+                  <form className="form-grid" onSubmit={addCustomer}>
+                    <Field
+                      label="First name"
+                      name="firstName"
+                      required
+                      placeholder="e.g. Juan"
+                      defaultValue={editingCustomer?.firstName || ""}
+                    />
+                    <Field
+                      label="Last name"
+                      name="lastName"
+                      required
+                      placeholder="e.g. Dela Cruz"
+                      defaultValue={editingCustomer?.lastName || ""}
+                    />
+                    <Field
+                      label="Contact number"
+                      name="phone"
+                      placeholder="09XXXXXXXXX"
+                      defaultValue={editingCustomer?.phone || ""}
+                    />
+                    <Field
+                      label="Address"
+                      name="address"
+                      placeholder="City or barangay"
+                      defaultValue={editingCustomer?.address || ""}
+                    />
+                    <button className="primary-button form-submit" type="submit">
+                      {editingCustomer ? "Save changes" : "＋ Add customer"}
+                    </button>
+                  </form>
               </section>
 
               <section className="panel">
@@ -415,14 +476,15 @@ async function addPayment(event) {
                     <thead>
                       <tr>
                         <th>Customer</th>
-                        <th>Contact number</th>
+                        <th>Contact Number</th>
                         <th>Address</th>
+                        <th>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       {customersLoading ? (
                         <tr>
-                          <td colSpan={3} className="empty-state">Loading customers...</td>
+                          <td colSpan={4} className="empty-state">Loading customers...</td>
                         </tr>
                       ) : (
                         <>
@@ -431,9 +493,18 @@ async function addPayment(event) {
                               <td><strong>{customer.name}</strong></td>
                               <td>{customer.phone || "—"}</td>
                               <td>{customer.address || "—"}</td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="secondary-button"
+                                  onClick={() => startEditingCustomer(customer)}
+                                >
+                                  Edit
+                                </button>
+                              </td>
                             </tr>
                           ))}
-                          {filteredCustomers.length === 0 && <EmptyRow columns={3} />}
+                          {filteredCustomers.length === 0 && <EmptyRow columns={4} />}
                         </>
                       )}
                     </tbody>
