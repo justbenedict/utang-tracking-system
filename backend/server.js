@@ -296,14 +296,23 @@ app.get("/api/debts", async (req, res) => {
         customers.last_name,
         debts.amount,
         debts.description,
-        debts.debt_date,
-        debts.due_date,
-        debts.status
+        TO_CHAR(debts.debt_date, 'YYYY-MM-DD') AS debt_date,
+        TO_CHAR(debts.due_date, 'YYYY-MM-DD') AS due_date,
+        debts.status,
+        COALESCE(
+          (
+            SELECT SUM(payments.amount)
+          FROM payments
+          WHERE payments.debt_id = debts.debt_id
+          ),
+          0
+        ) AS total_paid
       FROM debts
       INNER JOIN customers
         ON debts.customer_id = customers.customer_id
       ORDER BY debts.debt_id DESC
     `);
+
 
     res.status(200).json({
       success: true,
@@ -319,6 +328,206 @@ app.get("/api/debts", async (req, res) => {
     });
   }
 });
+
+
+/* PAYMENT HISTORY */
+
+// GET: Retrieve payment records from PostgreSQL
+app.get("/api/payments", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        payments.payment_id,
+        payments.debt_id,
+        payments.amount,
+        TO_CHAR(payments.payment_date, 'YYYY-MM-DD') AS payment_date,
+        payments.notes,
+        payments.created_at,
+        debts.description,
+        debts.customer_id,
+        customers.first_name,
+        customers.last_name
+      FROM payments
+      INNER JOIN debts
+        ON payments.debt_id = debts.debt_id
+      INNER JOIN customers
+        ON debts.customer_id = customers.customer_id
+      ORDER BY payments.payment_id DESC
+    `);
+
+    res.status(200).json({
+      success: true,
+      count: result.rows.length,
+      data: result.rows
+    });
+  } catch (error) {
+    console.error("Error retrieving payments:", error.message);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to retrieve payment records."
+    });
+  }
+});
+
+
+/* POST: Record a payment */
+
+app.post("/api/payments", async (req, res) => {
+  const { debt_id, amount, payment_date, notes } = req.body;
+
+  const debtId = Number(debt_id);
+  const paymentAmount = Number(amount);
+
+  if (!Number.isInteger(debtId) || debtId < 1) {
+    return res.status(400).json({
+      success: false,
+      message: "Please select a valid debt."
+    });
+  }
+
+  if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+    return res.status(400).json({
+      success: false,
+      message: "Payment amount must be greater than zero."
+    });
+  }
+
+  if (
+    typeof payment_date !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(payment_date)
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "A valid payment date is required."
+    });
+  }
+
+  const date = new Date(`${payment_date}T00:00:00.000Z`);
+
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.toISOString().slice(0, 10) !== payment_date
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "Payment date is invalid."
+    });
+  }
+
+  if (notes != null && typeof notes !== "string") {
+    return res.status(400).json({
+      success: false,
+      message: "Payment notes must be text."
+    });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const debtResult = await client.query(
+      `SELECT debt_id, amount, status
+       FROM debts
+       WHERE debt_id = $1
+       FOR UPDATE`,
+      [debtId]
+    );
+
+    if (debtResult.rowCount === 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        success: false,
+        message: "Debt not found."
+      });
+    }
+
+    const debt = debtResult.rows[0];
+
+    const paidResult = await client.query(
+      `SELECT COALESCE(SUM(amount), 0) AS total_paid
+       FROM payments
+       WHERE debt_id = $1`,
+      [debtId]
+    );
+
+    const totalPaid = Number(paidResult.rows[0].total_paid);
+    const debtAmount = Number(debt.amount);
+    const remaining = Math.round((debtAmount - totalPaid) * 100) / 100;
+
+    if (remaining <= 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(409).json({
+        success: false,
+        message: "This debt has already been fully paid."
+      });
+    }
+
+    if (Math.round(paymentAmount * 100) > Math.round(remaining * 100)) {
+      await client.query("ROLLBACK");
+
+      return res.status(400).json({
+        success: false,
+        message: `Payment exceeds the remaining balance of ${remaining.toFixed(2)}.`
+      });
+    }
+
+    const paymentResult = await client.query(
+      `INSERT INTO payments
+        (debt_id, amount, payment_date, notes)
+       VALUES ($1, $2, $3, $4)
+       RETURNING *`,
+      [
+        debtId,
+        paymentAmount,
+        payment_date,
+        notes?.trim() || null
+      ]
+    );
+
+    const newTotalPaid =
+      Math.round((totalPaid + paymentAmount) * 100) / 100;
+
+    const newStatus =
+      newTotalPaid >= debtAmount
+        ? "Paid"
+        : "Partially Paid";
+
+    await client.query(
+      `UPDATE debts
+       SET status = $1
+       WHERE debt_id = $2`,
+      [newStatus, debtId]
+    );
+
+    await client.query("COMMIT");
+
+    res.status(201).json({
+      success: true,
+      message: "Payment recorded successfully.",
+      data: paymentResult.rows[0],
+      total_paid: newTotalPaid,
+      remaining_balance:
+        Math.round((debtAmount - newTotalPaid) * 100) / 100,
+      debt_status: newStatus
+    });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+
+    console.error("Error recording payment:", error.message);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to record payment."
+    });
+  } finally {
+    client.release();
+  }
+});
+
 
 // Start the server
 app.listen(PORT, () => {

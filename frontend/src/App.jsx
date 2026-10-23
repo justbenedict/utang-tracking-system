@@ -58,7 +58,36 @@ function App() {
   useEffect(() => {
     loadCustomers();
     loadDebts();
+    loadPayments();
   }, []);
+
+  
+async function loadPayments() {
+  try {
+    const response = await fetch(`${API_URL}/payments`);
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      throw new Error(result.message || "Failed to load payments.");
+    }
+
+    setPayments(
+      result.data.map((payment) => ({
+        id: payment.payment_id,
+        debtId: payment.debt_id,
+        customer: `${payment.first_name} ${payment.last_name}`,
+        description: payment.description,
+        amount: Number(payment.amount),
+        date: String(payment.payment_date).slice(0, 10),
+        notes: payment.notes,
+      }))
+    );
+  } catch (error) {
+    console.error("Error loading payments:", error);
+    notify("Failed to load payment history.");
+  }
+}
+
   
   // Load saved debts from PostgreSQL through Express.
   async function loadDebts() {
@@ -79,7 +108,7 @@ function App() {
         date: debt.debt_date?.slice(0, 10) || "",
         due: debt.due_date?.slice(0, 10) || "",
         status: debt.status,
-        paid: 0,
+        paid: Number(debt.total_paid),
       }));
 
       setDebts(formattedDebts);
@@ -195,44 +224,57 @@ function App() {
   }
 
 
-  function addPayment(event) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const debtId = Number(form.get("debtId"));
-    const amount = Number(form.get("amount"));
-    const debt = debts.find((item) => item.id === debtId);
+  
+async function addPayment(event) {
+  event.preventDefault();
 
-    if (!debt || amount <= 0 || amount > debt.amount - debt.paid) {
-      notify("Enter a valid payment not exceeding the remaining balance.");
-      return;
+  const formElement = event.currentTarget;
+  const form = new FormData(formElement);
+
+  const debtId = Number(form.get("debtId"));
+  const amount = Number(form.get("amount"));
+  const paymentDate = form.get("date");
+
+  const debt = debts.find((item) => item.id === debtId);
+
+  if (
+    !debt ||
+    !Number.isFinite(amount) ||
+    amount <= 0 ||
+    amount > debt.amount - debt.paid
+  ) {
+    notify("Enter a valid payment not exceeding the remaining balance.");
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/payments`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        debt_id: debtId,
+        amount,
+        payment_date: paymentDate,
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      throw new Error(result.message || "Failed to record payment.");
     }
 
-    setDebts((current) =>
-      current.map((item) => {
-        if (item.id !== debtId) return item;
-        const paid = item.paid + amount;
-        return {
-          ...item,
-          paid,
-          status: paid >= item.amount ? "Paid" : "Partially Paid",
-        };
-      })
-    );
+    await Promise.all([loadDebts(), loadPayments()]);
 
-    setPayments((current) => [
-      {
-        id: Date.now(),
-        customer: debt.customer,
-        description: debt.description,
-        amount,
-        date: form.get("date"),
-      },
-      ...current,
-    ]);
-
-    event.currentTarget.reset();
-    notify("Payment recorded in this demo session.");
+    formElement.reset();
+    notify("Payment saved successfully to PostgreSQL.");
+  } catch (error) {
+    notify(`Could not record payment: ${error.message}`);
   }
+}
+
 
   const filteredCustomers = customers.filter((customer) =>
     `${customer.name} ${customer.phone} ${customer.address}`
