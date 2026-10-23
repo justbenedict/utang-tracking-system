@@ -755,6 +755,186 @@ app.post("/api/payments", async (req, res) => {
 });
 
 
+/* PUT: Update an existing payment */
+
+app.put("/api/payments/:id", async (req, res) => {
+  const paymentId = Number(req.params.id);
+  const { amount, payment_date, notes } = req.body;
+  const paymentAmount = Number(amount);
+
+  // Validate payment ID.
+  if (!Number.isInteger(paymentId) || paymentId < 1) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid payment ID."
+    });
+  }
+
+  // Validate payment amount.
+  if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+    return res.status(400).json({
+      success: false,
+      message: "Payment amount must be greater than zero."
+    });
+  }
+
+  // Validate payment date.
+  if (
+    typeof payment_date !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(payment_date)
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "A valid payment date is required."
+    });
+  }
+
+  const date = new Date(`${payment_date}T00:00:00.000Z`);
+
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.toISOString().slice(0, 10) !== payment_date
+  ) {
+    return res.status(400).json({
+      success: false,
+      message: "Payment date is invalid."
+    });
+  }
+
+  if (notes != null && typeof notes !== "string") {
+    return res.status(400).json({
+      success: false,
+      message: "Payment notes must be text."
+    });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    // Find the payment and identify its debt.
+    const paymentResult = await client.query(
+      `SELECT payment_id, debt_id
+       FROM payments
+       WHERE payment_id = $1`,
+      [paymentId]
+    );
+
+    if (paymentResult.rowCount === 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        success: false,
+        message: "Payment not found."
+      });
+    }
+
+    const debtId = paymentResult.rows[0].debt_id;
+
+    // Lock the debt so concurrent payment changes cannot
+    // incorrectly exceed its balance.
+    const debtResult = await client.query(
+      `SELECT debt_id, amount
+       FROM debts
+       WHERE debt_id = $1
+       FOR UPDATE`,
+      [debtId]
+    );
+
+    if (debtResult.rowCount === 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        success: false,
+        message: "Related debt not found."
+      });
+    }
+
+    const debtAmount = Number(debtResult.rows[0].amount);
+
+    // Exclude the payment being edited from the existing total.
+    const paidResult = await client.query(
+      `SELECT COALESCE(SUM(amount), 0) AS total_paid
+       FROM payments
+       WHERE debt_id = $1
+         AND payment_id <> $2`,
+      [debtId, paymentId]
+    );
+
+    const otherPayments = Number(paidResult.rows[0].total_paid);
+    const remaining =
+      Math.round((debtAmount - otherPayments) * 100) / 100;
+
+    if (Math.round(paymentAmount * 100) > Math.round(remaining * 100)) {
+      await client.query("ROLLBACK");
+
+      return res.status(400).json({
+        success: false,
+        message: `Payment exceeds the available balance of ${remaining.toFixed(2)}.`
+      });
+    }
+
+    // Save the edited payment.
+    const updatedPayment = await client.query(
+      `UPDATE payments
+       SET amount = $1,
+           payment_date = $2,
+           notes = $3
+       WHERE payment_id = $4
+       RETURNING *`,
+      [
+        paymentAmount,
+        payment_date,
+        notes?.trim() || null,
+        paymentId
+      ]
+    );
+
+    // Recalculate the total and debt status.
+    const newTotalPaid =
+      Math.round((otherPayments + paymentAmount) * 100) / 100;
+
+    const newStatus =
+      newTotalPaid >= debtAmount
+        ? "Paid"
+        : newTotalPaid > 0
+          ? "Partially Paid"
+          : "Unpaid";
+
+    await client.query(
+      `UPDATE debts
+       SET status = $1
+       WHERE debt_id = $2`,
+      [newStatus, debtId]
+    );
+
+    await client.query("COMMIT");
+
+    return res.status(200).json({
+      success: true,
+      message: "Payment updated successfully.",
+      data: updatedPayment.rows[0],
+      total_paid: newTotalPaid,
+      remaining_balance:
+        Math.round((debtAmount - newTotalPaid) * 100) / 100,
+      debt_status: newStatus
+    });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+
+    console.error("Error updating payment:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update payment."
+    });
+  } finally {
+    client.release();
+  }
+});
+
+
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);

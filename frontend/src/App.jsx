@@ -18,6 +18,7 @@ function App() {
   const [debtsLoading, setDebtsLoading] = useState(true);
   const [editingDebt, setEditingDebt] = useState(null);
   const [payments, setPayments] = useState([]);
+  const [editingPayment, setEditingPayment] = useState(null);
   const [reportStartDate, setReportStartDate] = useState("");
   const [reportEndDate, setReportEndDate] = useState("");
   const [search, setSearch] = useState("");
@@ -394,55 +395,88 @@ function App() {
     }
   }
 
+  function startEditingPayment(payment) {
+    setEditingPayment(payment);
+    setPage("Payments");
+    setSearch("");
+    setMessage("");
+  }
+
   async function addPayment(event) {
     event.preventDefault();
 
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
 
-    const debtId = Number(form.get("debtId"));
+    const isEditing = editingPayment !== null;
+    const debtId = isEditing
+      ? editingPayment.debtId
+      : Number(form.get("debtId"));
+
     const amount = Number(form.get("amount"));
     const paymentDate = form.get("date");
-    const notes = form.get("notes").trim();
+    const notes = (form.get("notes") || "").trim();
 
     const debt = debts.find((item) => item.id === debtId);
 
-    if (
-      !debt ||
-      !Number.isFinite(amount) ||
-      amount <= 0 ||
-      amount > debt.amount - debt.paid
-    ) {
+    if (!debt) {
+      notify("The selected debt record could not be found.");
+      return;
+    }
+
+    const availableBalance = isEditing
+      ? debt.amount - debt.paid + editingPayment.amount
+      : debt.amount - debt.paid;
+
+    if (!Number.isFinite(amount) || amount <= 0 || amount > availableBalance) {
       notify("Enter a valid payment not exceeding the remaining balance.");
       return;
     }
 
     try {
-      const response = await fetch(`${API_URL}/payments`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      const response = await fetch(
+        isEditing
+          ? `${API_URL}/payments/${editingPayment.id}`
+          : `${API_URL}/payments`,
+        {
+          method: isEditing ? "PUT" : "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            ...(isEditing ? {} : { debt_id: debtId }),
+            amount,
+            payment_date: paymentDate,
+            notes,
+          }),
         },
-        body: JSON.stringify({
-          debt_id: debtId,
-          amount,
-          payment_date: paymentDate,
-          notes,
-        }),
-      });
+      );
 
       const result = await response.json();
 
       if (!response.ok || !result.success) {
-        throw new Error(result.message || "Failed to record payment.");
+        throw new Error(
+          result.message ||
+            (isEditing
+              ? "Failed to update payment."
+              : "Failed to record payment."),
+        );
       }
 
       await Promise.all([loadDebts(), loadPayments()]);
 
       formElement.reset();
-      notify("Payment saved successfully to PostgreSQL.");
+      setEditingPayment(null);
+
+      notify(
+        isEditing
+          ? "Payment updated successfully."
+          : "Payment saved successfully to PostgreSQL.",
+      );
     } catch (error) {
-      notify(`Could not record payment: ${error.message}`);
+      notify(
+        `Could not ${isEditing ? "update" : "record"} payment: ${error.message}`,
+      );
     }
   }
 
@@ -862,24 +896,30 @@ function App() {
                 />
               </section>
               <section className="panel form-panel">
-                <h2>Record a payment</h2>
-                <form className="form-grid" onSubmit={addPayment}>
-                  <label className="field">
-                    <span>Debt record *</span>
-                    <select name="debtId" required defaultValue="">
-                      <option value="" disabled>
-                        Select a debt
-                      </option>
-                      {debts
-                        .filter((debt) => debt.paid < debt.amount)
-                        .map((debt) => (
-                          <option key={debt.id} value={debt.id}>
-                            {debt.customer} — {money(debt.amount - debt.paid)}{" "}
-                            remaining
-                          </option>
-                        ))}
-                    </select>
-                  </label>
+                <h2>{editingPayment ? "Edit payment" : "Record a payment"}</h2>
+                <form
+                  key={editingPayment?.id ?? "new"}
+                  className="form-grid"
+                  onSubmit={addPayment}
+                >
+                  {!editingPayment && (
+                    <label className="field">
+                      <span>Debt record *</span>
+                      <select name="debtId" required defaultValue="">
+                        <option value="" disabled>
+                          Select a debt
+                        </option>
+                        {debts
+                          .filter((debt) => debt.paid < debt.amount)
+                          .map((debt) => (
+                            <option key={debt.id} value={debt.id}>
+                              {debt.customer} — {money(debt.amount - debt.paid)}{" "}
+                              remaining
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                  )}
                   <Field
                     label="Payment amount (₱)"
                     name="amount"
@@ -888,22 +928,38 @@ function App() {
                     step="0.01"
                     required
                     placeholder="0.00"
+                    defaultValue={editingPayment?.amount ?? ""}
                   />
+
                   <Field
                     label="Payment date"
                     name="date"
                     type="date"
                     required
-                    defaultValue={new Date().toLocaleDateString("en-CA")}
+                    defaultValue={
+                      editingPayment?.date ||
+                      new Date().toLocaleDateString("en-CA")
+                    }
                   />
+
                   <Field
                     label="Notes (optional)"
                     name="notes"
                     placeholder="e.g. Partial payment for school expenses"
+                    defaultValue={editingPayment?.notes ?? ""}
                   />
                   <button className="primary-button form-submit" type="submit">
-                    ✓ Record payment
+                    {editingPayment ? "Save changes" : "✓ Record payment"}
                   </button>
+                  {editingPayment && (
+                    <button
+                      className="secondary-button form-submit"
+                      type="button"
+                      onClick={() => setEditingPayment(null)}
+                    >
+                      Cancel editing
+                    </button>
+                  )}
                 </form>
               </section>
 
@@ -923,6 +979,7 @@ function App() {
                         <th>Payment date</th>
                         <th>Amount</th>
                         <th>Notes</th>
+                        <th>Actions</th>
                       </tr>
                     </thead>
 
@@ -938,11 +995,20 @@ function App() {
                             {money(payment.amount)}
                           </td>
                           <td>{payment.notes || "—"}</td>
+                          <td>
+                            <button
+                              className="secondary-button"
+                              type="button"
+                              onClick={() => startEditingPayment(payment)}
+                            >
+                              Edit
+                            </button>
+                          </td>
                         </tr>
                       ))}
 
                       {filteredPayments.length === 0 && (
-                        <EmptyRow columns={5} />
+                        <EmptyRow columns={6} />
                       )}
                     </tbody>
                   </table>
