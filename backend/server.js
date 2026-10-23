@@ -236,16 +236,55 @@ app.post("/api/debts", async (req, res) => {
     }
 
     if (
-      typeof description !== "string" ||
-      !description.trim() ||
-      typeof debt_date !== "string" ||
-      !/^\d{4}-\d{2}-\d{2}$/.test(debt_date)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "A description and valid debt date are required."
-      });
+  typeof description !== "string" ||
+  !description.trim() ||
+  typeof debt_date !== "string" ||
+  !/^\d{4}-\d{2}-\d{2}$/.test(debt_date)
+) {
+  return res.status(400).json({
+    success: false,
+    message: "A description and valid debt date are required."
+  });
+}
+
+const debtDate = new Date(`${debt_date}T00:00:00.000Z`);
+
+if (
+  Number.isNaN(debtDate.getTime()) ||
+  debtDate.toISOString().slice(0, 10) !== debt_date
+) {
+  return res.status(400).json({
+    success: false,
+    message: "Debt date is invalid."
+  });
     }
+    
+    
+    // Validate optional due date
+    if (due_date != null && due_date !== "") {
+      if (
+        typeof due_date !== "string" ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(due_date)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "A valid due date is required."
+        });
+      }
+
+      const dueDate = new Date(`${due_date}T00:00:00.000Z`);
+
+      if (
+        Number.isNaN(dueDate.getTime()) ||
+        dueDate.toISOString().slice(0, 10) !== due_date
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Due date is invalid."
+        });
+      }
+    }
+
 
     const result = await pool.query(
       `INSERT INTO debts
@@ -371,6 +410,35 @@ app.put("/api/debts/:id", async (req, res) => {
     }
 
     // Validate description and dates
+
+    
+    // Validate optional due date
+    if (due_date != null && due_date !== "") {
+      if (
+        typeof due_date !== "string" ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(due_date)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "A valid due date is required."
+        });
+      }
+
+      const dueDate = new Date(`${due_date}T00:00:00.000Z`);
+
+      if (
+        Number.isNaN(dueDate.getTime()) ||
+        dueDate.toISOString().slice(0, 10) !== due_date
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Due date is invalid."
+        });
+      }
+    }
+
+    
+    // Validate description and debt date format
     if (
       typeof description !== "string" ||
       !description.trim() ||
@@ -382,6 +450,20 @@ app.put("/api/debts/:id", async (req, res) => {
         message: "A description and valid debt date are required."
       });
     }
+
+    // Validate that the debt date exists on the calendar
+    const debtDate = new Date(`${debt_date}T00:00:00.000Z`);
+
+    if (
+      Number.isNaN(debtDate.getTime()) ||
+      debtDate.toISOString().slice(0, 10) !== debt_date
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Debt date is invalid."
+      });
+    }
+
 
     
     // Check that the debt exists and calculate payments already made
