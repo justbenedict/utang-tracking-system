@@ -17,9 +17,7 @@ function App() {
   const [customersLoading, setCustomersLoading] = useState(true);
   const [debts, setDebts] = useState([]);
   const [debtsLoading, setDebtsLoading] = useState(true);
-  const [payments, setPayments] = useState([
-    { id: 1, customer: "Maria Santos", description: "Personal loan", amount: 200, date: "2026-10-16" },
-  ]);
+  const [payments, setPayments] = useState([]);
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
 
