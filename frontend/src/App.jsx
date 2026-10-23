@@ -403,6 +403,7 @@ function App() {
     const debtId = Number(form.get("debtId"));
     const amount = Number(form.get("amount"));
     const paymentDate = form.get("date");
+    const notes = form.get("notes").trim();
 
     const debt = debts.find((item) => item.id === debtId);
 
@@ -426,6 +427,7 @@ function App() {
           debt_id: debtId,
           amount,
           payment_date: paymentDate,
+          notes,
         }),
       });
 
@@ -893,6 +895,11 @@ function App() {
                     type="date"
                     required
                     defaultValue={new Date().toLocaleDateString("en-CA")}
+                  />
+                  <Field
+                    label="Notes (optional)"
+                    name="notes"
+                    placeholder="e.g. Partial payment for school expenses"
                   />
                   <button className="primary-button form-submit" type="submit">
                     ✓ Record payment
