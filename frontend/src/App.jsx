@@ -18,8 +18,15 @@ function App() {
   const [debtsLoading, setDebtsLoading] = useState(true);
   const [editingDebt, setEditingDebt] = useState(null);
   const [payments, setPayments] = useState([]);
+  const [reportStartDate, setReportStartDate] = useState("");
+  const [reportEndDate, setReportEndDate] = useState("");
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
+  const filteredReportDebts = debts.filter((debt) => {
+    if (reportStartDate && debt.date < reportStartDate) return false;
+    if (reportEndDate && debt.date > reportEndDate) return false;
+    return true;
+  });
 
   const outstanding = debts.reduce(
     (sum, debt) => sum + debt.amount - debt.paid,
@@ -32,6 +39,32 @@ function App() {
 
   // Find debts that are overdue and still have an unpaid balance.
   const today = new Date().toLocaleDateString("en-CA");
+
+  const filteredReportPayments = payments.filter((payment) => {
+    if (reportStartDate && payment.date < reportStartDate) return false;
+    if (reportEndDate && payment.date > reportEndDate) return false;
+    return true;
+  });
+
+  const reportTotalDebt = filteredReportDebts.reduce(
+    (sum, debt) => sum + debt.amount,
+    0,
+  );
+
+  const reportPaymentsCollected = filteredReportPayments.reduce(
+    (sum, payment) => sum + payment.amount,
+    0,
+  );
+
+  const reportOutstandingBalance = filteredReportDebts.reduce(
+    (sum, debt) => sum + Math.max(0, debt.amount - debt.paid),
+    0,
+  );
+
+  const reportOverdueBalance = filteredReportDebts.reduce((sum, debt) => {
+    const isOverdue = debt.due && debt.due < today && debt.amount > debt.paid;
+    return sum + (isOverdue ? debt.amount - debt.paid : 0);
+  }, 0);
 
   const overdueDebts = debts.filter(
     (debt) => debt.due && debt.due < today && debt.amount > debt.paid,
@@ -434,6 +467,7 @@ function App() {
     { name: "Customers", icon: "♙" },
     { name: "Debt Records", icon: "▤" },
     { name: "Payments", icon: "₱" },
+    { name: "Reports", icon: "▥" },
   ];
 
   return (
@@ -877,6 +911,94 @@ function App() {
                 </div>
               </section>
             </>
+          )}
+
+          {page === "Reports" && (
+            <div className="page-content">
+              <PageIntro
+                eyebrow="UTANG TRACKING SYSTEM"
+                title="Reports"
+                description="Review debt records, collected payments, and outstanding balances."
+              />
+
+              <div className="panel">
+                <div className="form-grid">
+                  <Field
+                    label="Start date"
+                    name="reportStartDate"
+                    type="date"
+                    value={reportStartDate}
+                    onChange={(event) => setReportStartDate(event.target.value)}
+                  />
+
+                  <Field
+                    label="End date"
+                    name="reportEndDate"
+                    type="date"
+                    value={reportEndDate}
+                    onChange={(event) => setReportEndDate(event.target.value)}
+                  />
+
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => {
+                      setReportStartDate("");
+                      setReportEndDate("");
+                    }}
+                  >
+                    Clear dates
+                  </button>
+                </div>
+
+                <div className="panel report-actions">
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={() => window.print()}
+                  >
+                    Print Report / Save as PDF
+                  </button>
+                </div>
+              </div>
+
+              <div className="stats-grid">
+                <StatCard
+                  label="Total Debt"
+                  value={money(reportTotalDebt)}
+                  detail="Debts created in selected period"
+                />
+
+                <StatCard
+                  label="Payments Collected"
+                  value={money(reportPaymentsCollected)}
+                  detail="Payments received in selected period"
+                />
+
+                <StatCard
+                  label="Outstanding Balance"
+                  value={money(reportOutstandingBalance)}
+                  detail="Current balance of filtered debts"
+                />
+
+                <StatCard
+                  label="Overdue Balance"
+                  value={money(reportOverdueBalance)}
+                  detail="Overdue balance of filtered debts"
+                />
+              </div>
+
+              <div className="panel">
+                <div className="panel-header">
+                  <div>
+                    <h2>Debt Report</h2>
+                    <p>Overview of all recorded debt accounts.</p>
+                  </div>
+                </div>
+
+                <DebtTable debts={filteredReportDebts} today={today} />
+              </div>
+            </div>
           )}
 
           <footer className="footer">

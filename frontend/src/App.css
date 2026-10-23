@@ -572,3 +572,62 @@ tbody tr:last-child td {
     font-size: 10px;
   }
 }
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+
+  .sidebar,
+  .topbar,
+  .report-actions,
+  .toast,
+  .footer {
+    display: none !important;
+  }
+
+  .app-shell {
+    display: block !important;
+    min-height: auto !important;
+  }
+
+  .main-area {
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .content {
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  .panel,
+  .stat-card {
+    break-inside: avoid;
+    box-shadow: none !important;
+  }
+
+  .page-intro {
+    margin-top: 0 !important;
+  }
+
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+
+  th,
+  td {
+    color: black !important;
+    border: 1px solid #ccc !important;
+  }
+
+  button,
+  input,
+  select,
+  .report-actions,
+  .panel .field {
+  display: none !important;
+  }
+}
