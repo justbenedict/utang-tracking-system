@@ -29,7 +29,12 @@ function App() {
 
   function notify(text) {
     setMessage(text);
-    window.setTimeout(() => setMessage(""), 3000);
+    
+    window.clearTimeout(window.toastTimer);
+    
+    window.toastTimer = window.setTimeout(() => {
+      setMessage("");
+    }, 3000);
   }
 
   // Load customers from the PostgreSQL database through Express.
@@ -281,6 +286,42 @@ function startEditingDebt(debt) {
   setSearch("");
   setMessage("");
 }
+
+
+
+async function deleteDebt(debt) {
+  const confirmed = window.confirm(
+    `Are you sure you want to delete the debt record for ${debt.customer}?\n\nDescription: ${debt.description}\nAmount: ${money(debt.amount)}\n\nThis action cannot be undone.`
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/debts/${debt.id}`, {
+      method: "DELETE",
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      throw new Error(result.message || "Failed to delete debt.");
+    }
+
+    await Promise.all([loadDebts(), loadPayments()]);
+
+    if (editingDebt?.id === debt.id) {
+      setEditingDebt(null);
+    }
+
+    notify("Debt deleted successfully."); 
+  } catch (error) {
+    console.error("Delete debt error:", error);
+    notify(error.message || "Failed to delete debt.");
+  }
+}
+
 
   
 async function addPayment(event) {
@@ -621,6 +662,7 @@ async function addPayment(event) {
                 <DebtTable
                   debts={filteredDebts}
                   onEdit={startEditingDebt}
+                  onDelete={deleteDebt}
                 />
               </section>
             </>
@@ -722,7 +764,10 @@ function PanelSearch({ title, count, search, setSearch }) {
 }
 
 
-function DebtTable({ debts, onEdit }) {
+
+function DebtTable({ debts, onEdit, onDelete }) {
+  const showActions = onEdit || onDelete;
+
   return (
     <div className="table-wrap">
       <table>
@@ -734,16 +779,19 @@ function DebtTable({ debts, onEdit }) {
             <th>Balance</th>
             <th>Due date</th>
             <th>Status</th>
-            {onEdit && <th>Actions</th>}
+            {showActions && <th>Actions</th>}
           </tr>
         </thead>
+
         <tbody>
           {debts.map((debt) => (
             <tr key={debt.id}>
               <td><strong>{debt.customer}</strong></td>
               <td>{debt.description}</td>
               <td>{money(debt.amount)}</td>
-              <td><strong>{money(debt.amount - debt.paid)}</strong></td>
+              <td>
+                <strong>{money(debt.amount - debt.paid)}</strong>
+              </td>
               <td>{debt.due || "—"}</td>
               <td>
                 <span
@@ -752,27 +800,44 @@ function DebtTable({ debts, onEdit }) {
                   {debt.status}
                 </span>
               </td>
-              {onEdit && (
+
+              {showActions && (
                 <td>
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={() => onEdit(debt)}
-                  >
-                    Edit
-                  </button>
+                  {onEdit && (
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => onEdit(debt)}
+                    >
+                      Edit
+                    </button>
+                  )}
+
+                  {" "}
+
+                  {onDelete && (
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => onDelete(debt)}
+                    >
+                      Delete
+                    </button>
+                  )}
                 </td>
               )}
             </tr>
           ))}
+
           {debts.length === 0 && (
-            <EmptyRow columns={onEdit ? 7 : 6} />
+            <EmptyRow columns={showActions ? 7 : 6} />
           )}
         </tbody>
       </table>
     </div>
   );
 }
+
 
 
 function EmptyRow({ columns }) {

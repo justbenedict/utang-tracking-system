@@ -466,6 +466,96 @@ app.put("/api/debts/:id", async (req, res) => {
 });
 
 
+/* DELETE: Remove a debt without payment history */
+app.delete("/api/debts/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  let client;
+
+  if (!Number.isInteger(id) || id < 1) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid debt ID.",
+    });
+  }
+
+  try {
+    client = await pool.connect();
+    await client.query("BEGIN");
+
+    // Find and lock the debt record.
+    const debtResult = await client.query(
+      `SELECT debt_id
+       FROM debts
+       WHERE debt_id = $1
+       FOR UPDATE`,
+      [id]
+    );
+
+    if (debtResult.rowCount === 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        success: false,
+        message: "Debt record not found.",
+      });
+    }
+
+    // Protect debts that have recorded payments.
+    const paymentResult = await client.query(
+      `SELECT payment_id
+       FROM payments
+       WHERE debt_id = $1
+       LIMIT 1`,
+      [id]
+    );
+
+    if (paymentResult.rowCount > 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(409).json({
+        success: false,
+        message:
+          "This debt cannot be deleted because it has payment history.",
+      });
+    }
+
+    // Delete the debt only after the safeguards pass.
+    await client.query(
+      "DELETE FROM debts WHERE debt_id = $1",
+      [id]
+    );
+
+    await client.query("COMMIT");
+
+    return res.status(200).json({
+      success: true,
+      message: "Debt deleted successfully.",
+    });
+  } catch (error) {
+    if (client) {
+      await client.query("ROLLBACK").catch(() => {});
+    }
+
+    console.error("Error deleting debt:", error.message);
+
+    if (error.code === "23503") {
+      return res.status(409).json({
+        success: false,
+        message:
+          "This debt cannot be deleted because it is referenced by other records.",
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete debt record.",
+    });
+  } finally {
+    client?.release();
+  }
+});
+
+
 /* PAYMENT HISTORY */
 
 // GET: Retrieve payment records from PostgreSQL
