@@ -330,6 +330,142 @@ app.get("/api/debts", async (req, res) => {
 });
 
 
+/* PUT: Update an existing debt */
+app.put("/api/debts/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    const {
+      customer_id,
+      amount,
+      description,
+      debt_date,
+      due_date
+    } = req.body;
+
+    const customerId = Number(customer_id);
+    const debtAmount = Number(amount);
+
+    // Validate debt ID
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid debt ID."
+      });
+    }
+
+    // Validate customer
+    if (!Number.isInteger(customerId) || customerId < 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Please select a valid customer."
+      });
+    }
+
+    // Validate amount
+    if (!Number.isFinite(debtAmount) || debtAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Debt amount must be greater than zero."
+      });
+    }
+
+    // Validate description and dates
+    if (
+      typeof description !== "string" ||
+      !description.trim() ||
+      typeof debt_date !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(debt_date)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "A description and valid debt date are required."
+      });
+    }
+
+    
+    // Check that the debt exists and calculate payments already made
+    const debtResult = await pool.query(
+      `SELECT
+         debts.debt_id,
+         COALESCE(SUM(payments.amount), 0) AS total_paid
+       FROM debts
+       LEFT JOIN payments
+         ON payments.debt_id = debts.debt_id
+       WHERE debts.debt_id = $1
+       GROUP BY debts.debt_id`,
+      [id]
+    );
+
+    if (debtResult.rowCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Debt record not found."
+      });
+    }
+
+    const totalPaid = Number(debtResult.rows[0].total_paid);
+
+    if (
+      Math.round(debtAmount * 100) <
+      Math.round(totalPaid * 100)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: `Debt amount cannot be less than the total already paid (${totalPaid.toFixed(2)}).`
+      });
+    }
+
+    const result = await pool.query(
+      `UPDATE debts
+       SET customer_id = $1,
+           amount = $2,
+           description = $3,
+           debt_date = $4,
+           due_date = $5
+       WHERE debt_id = $6
+       RETURNING *`,
+      [
+        customerId,
+        debtAmount,
+        description.trim(),
+        debt_date,
+        due_date || null,
+        id
+      ]
+    );
+
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Debt record not found."
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Debt updated successfully.",
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error("Error updating debt:", error.message);
+
+    if (error.code === "23503") {
+      return res.status(400).json({
+        success: false,
+        message: "The selected customer does not exist."
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to update debt record."
+    });
+  }
+});
+
+
 /* PAYMENT HISTORY */
 
 // GET: Retrieve payment records from PostgreSQL

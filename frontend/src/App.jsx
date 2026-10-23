@@ -18,6 +18,7 @@ function App() {
   const [editingCustomer, setEditingCustomer] = useState(null);
   const [debts, setDebts] = useState([]);
   const [debtsLoading, setDebtsLoading] = useState(true);
+  const [editingDebt, setEditingDebt] = useState(null);
   const [payments, setPayments] = useState([]);
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
@@ -206,33 +207,40 @@ function startEditingCustomer(customer) {
   setMessage("");
 }
   
-  async function addDebt(event) {
-    event.preventDefault();
+  
+async function addDebt(event) {
+  event.preventDefault();
 
-    const formElement = event.currentTarget;
-    const form = new FormData(formElement);
+  const formElement = event.currentTarget;
+  const form = new FormData(formElement);
 
-    const customerId = Number(form.get("customerId"));
-    const customer = customers.find((item) => item.id === customerId);
+  const customerId = Number(form.get("customerId"));
+  const customer = customers.find((item) => item.id === customerId);
 
-    if (!customer) {
-      notify("Please select a customer.");
-      return;
-    }
+  if (!customer) {
+    notify("Please select a customer.");
+    return;
+  }
 
-    const amount = Number(form.get("amount"));
-    const description = form.get("description").trim();
-    const date = form.get("date");
-    const due = form.get("due") || "";
+  const amount = Number(form.get("amount"));
+  const description = form.get("description").trim();
+  const date = form.get("date");
+  const due = form.get("due") || "";
 
-    if (!Number.isFinite(amount) || amount <= 0 || !description || !date) {
-      notify("Please enter a valid amount, description, and debt date.");
-      return;
-    }
+  if (!Number.isFinite(amount) || amount <= 0 || !description || !date) {
+    notify("Please enter a valid amount, description, and debt date.");
+    return;
+  }
 
-    try {
-      const response = await fetch(`${API_URL}/debts`, {
-        method: "POST",
+  const isEditing = editingDebt !== null;
+
+  try {
+    const response = await fetch(
+      isEditing
+        ? `${API_URL}/debts/${editingDebt.id}`
+        : `${API_URL}/debts`,
+      {
+        method: isEditing ? "PUT" : "POST",
         headers: {
           "Content-Type": "application/json",
         },
@@ -243,23 +251,36 @@ function startEditingCustomer(customer) {
           debt_date: date,
           due_date: due || null,
         }),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok || !result.success) {
-        throw new Error(result.message || "Failed to save debt.");
       }
+    );
 
-      await loadDebts();
+    const result = await response.json();
 
-      formElement.reset();
-      notify("Debt saved successfully to PostgreSQL.");
-    } catch (error) {
-      notify(`Could not save debt: ${error.message}`);
+    if (!response.ok || !result.success) {
+      throw new Error(result.message || "Failed to save debt.");
     }
-  }
 
+    await Promise.all([loadDebts(), loadPayments()]);
+
+    setEditingDebt(null);
+    formElement.reset();
+
+    notify(
+      isEditing
+        ? "Debt updated successfully."
+        : "Debt saved successfully to PostgreSQL."
+    );
+  } catch (error) {
+    notify(`Could not save debt: ${error.message}`);
+  }
+}
+
+function startEditingDebt(debt) {
+  setEditingDebt(debt);
+  setPage("Debt Records");
+  setSearch("");
+  setMessage("");
+}
 
   
 async function addPayment(event) {
@@ -517,29 +538,90 @@ async function addPayment(event) {
           {page === "Debt Records" && (
             <>
               <PageIntro title="Debt records" subtitle="Create and monitor debts linked to registered customers." />
+              
               <section className="panel form-panel">
-                <h2>Add a debt record</h2>
-                <form className="form-grid" onSubmit={addDebt}>
+                <h2>{editingDebt ? "Edit debt record" : "Add a debt record"}</h2>
+
+                <form
+                  key={editingDebt?.id ?? "new"}
+                  className="form-grid"
+                  onSubmit={addDebt}
+                >
                   <label className="field">
                     <span>Customer *</span>
-                    <select name="customerId" required defaultValue="">
+                    <select
+                      name="customerId"
+                      required
+                      defaultValue={editingDebt?.customerId ?? ""}
+                    >
                       <option value="" disabled>Select a customer</option>
                       {customers.map((customer) => (
-                        <option key={customer.id} value={customer.id}>{customer.name}</option>
+                        <option key={customer.id} value={customer.id}>
+                          {customer.name}
+                        </option>
                       ))}
                     </select>
                   </label>
-                  <Field label="Amount (₱)" name="amount" type="number" min="0.01" step="0.01" required placeholder="0.00" />
-                  <Field label="Description" name="description" required placeholder="Reason for the debt" />
-                  <Field label="Debt date" name="date" type="date" required defaultValue={new Date().toLocaleDateString("en-CA")} />
-                  <Field label="Due date" name="due" type="date" />
-                  <button className="primary-button form-submit" type="submit">＋ Add debt</button>
+                    
+                  <Field
+                    label="Amount (₱)"
+                    name="amount"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    required
+                    placeholder="0.00"
+                    defaultValue={editingDebt?.amount ?? ""}
+                  />
+
+                  <Field
+                    label="Description"
+                    name="description"
+                    required
+                    placeholder="Reason for the debt"
+                    defaultValue={editingDebt?.description ?? ""}
+                  />
+
+                  <Field
+                    label="Debt date"
+                    name="date"
+                    type="date"
+                    required
+                    defaultValue={
+                      editingDebt?.date || new Date().toLocaleDateString("en-CA")
+                    }
+                  />
+
+                  <Field
+                    label="Due date"
+                    name="due"
+                    type="date"
+                    defaultValue={editingDebt?.due || ""}
+                  />
+
+                  <button className="primary-button form-submit" type="submit">
+                    {editingDebt ? "Save changes" : "＋ Add debt"}
+                  </button>
+                  
+                  {editingDebt && (
+                    <button
+                      className="secondary-button form-submit"
+                      type="button"
+                      onClick={() => setEditingDebt(null)}
+                    >
+                      Cancel editing
+                    </button>
+                  )}
                 </form>
               </section>
 
+
               <section className="panel">
                 <PanelSearch title="All debt records" count={filteredDebts.length} search={search} setSearch={setSearch} />
-                <DebtTable debts={filteredDebts} />
+                <DebtTable
+                  debts={filteredDebts}
+                  onEdit={startEditingDebt}
+                />
               </section>
             </>
           )}
@@ -639,7 +721,8 @@ function PanelSearch({ title, count, search, setSearch }) {
   );
 }
 
-function DebtTable({ debts }) {
+
+function DebtTable({ debts, onEdit }) {
   return (
     <div className="table-wrap">
       <table>
@@ -651,6 +734,7 @@ function DebtTable({ debts }) {
             <th>Balance</th>
             <th>Due date</th>
             <th>Status</th>
+            {onEdit && <th>Actions</th>}
           </tr>
         </thead>
         <tbody>
@@ -661,15 +745,35 @@ function DebtTable({ debts }) {
               <td>{money(debt.amount)}</td>
               <td><strong>{money(debt.amount - debt.paid)}</strong></td>
               <td>{debt.due || "—"}</td>
-              <td><span className={`status status-${debt.status.toLowerCase().replaceAll(" ", "-")}`}>{debt.status}</span></td>
+              <td>
+                <span
+                  className={`status status-${debt.status.toLowerCase().replaceAll(" ", "-")}`}
+                >
+                  {debt.status}
+                </span>
+              </td>
+              {onEdit && (
+                <td>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => onEdit(debt)}
+                  >
+                    Edit
+                  </button>
+                </td>
+              )}
             </tr>
           ))}
-          {debts.length === 0 && <EmptyRow columns={6} />}
+          {debts.length === 0 && (
+            <EmptyRow columns={onEdit ? 7 : 6} />
+          )}
         </tbody>
       </table>
     </div>
   );
 }
+
 
 function EmptyRow({ columns }) {
   return <tr><td colSpan={columns} className="empty-state">No records found.</td></tr>;
