@@ -631,3 +631,9 @@ tbody tr:last-child td {
   display: none !important;
   }
 }
+.report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}

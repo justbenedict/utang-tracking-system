@@ -462,6 +462,33 @@ function App() {
       .includes(search.toLowerCase()),
   );
 
+  function exportCSV(filename, headers, rows) {
+    const escapeCSV = (value) => {
+      const text = String(value ?? "");
+      return `"${text.replace(/"/g, '""')}"`;
+    };
+
+    const csvContent = [
+      headers.map(escapeCSV).join(","),
+      ...rows.map((row) => row.map(escapeCSV).join(",")),
+    ].join("\r\n");
+
+    const blob = new Blob(["\uFEFF" + csvContent], {
+      type: "text/csv;charset=utf-8;",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    URL.revokeObjectURL(url);
+  }
+
   const navItems = [
     { name: "Dashboard", icon: "⌂" },
     { name: "Customers", icon: "♙" },
@@ -958,6 +985,68 @@ function App() {
                     onClick={() => window.print()}
                   >
                     Print Report / Save as PDF
+                  </button>
+
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() =>
+                      exportCSV(
+                        "utangtrack-debt-report.csv",
+                        [
+                          "Customer",
+                          "Description",
+                          "Debt Date",
+                          "Due Date",
+                          "Debt Amount",
+                          "Amount Paid",
+                          "Outstanding Balance",
+                          "Status",
+                        ],
+                        filteredReportDebts.map((debt) => [
+                          debt.customer,
+                          debt.description,
+                          debt.date,
+                          debt.due,
+                          debt.amount.toFixed(2),
+                          debt.paid.toFixed(2),
+                          Math.max(0, debt.amount - debt.paid).toFixed(2),
+                          debt.amount > debt.paid &&
+                          debt.due &&
+                          debt.due < today
+                            ? "Overdue"
+                            : debt.status,
+                        ]),
+                      )
+                    }
+                  >
+                    Export Debt Report (CSV)
+                  </button>
+
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() =>
+                      exportCSV(
+                        "utangtrack-payment-report.csv",
+                        [
+                          "Customer",
+                          "Description",
+                          "Payment Date",
+                          "Amount",
+                          "Notes",
+                        ],
+                        filteredReportPayments.map((payment) => [
+                          payment.customer,
+                          payment.description,
+                          payment.date,
+                          payment.amount.toFixed(2),
+                          payment.notes || "",
+                        ]),
+                      )
+                    }
+                  >
+                    Export Payment Report (CSV)
                   </button>
                 </div>
               </div>
