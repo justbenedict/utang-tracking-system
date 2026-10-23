@@ -1207,7 +1207,7 @@ function App() {
   );
 }
 
-function StatCard({ label, value, icon }) {
+function StatCard({ label, value, icon, detail }) {
   return (
     <div className="stat-card">
       <div className="stat-top">
@@ -1215,6 +1215,7 @@ function StatCard({ label, value, icon }) {
         <span className="stat-icon">{icon}</span>
       </div>
       <strong className="stat-value">{value}</strong>
+      {detail && <p className="stat-detail">{detail}</p>}
     </div>
   );
 }

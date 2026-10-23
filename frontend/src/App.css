@@ -266,6 +266,12 @@ button {
   letter-spacing: -0.8px;
   overflow-wrap: anywhere;
 }
+.stat-detail {
+  margin: 8px 0 0;
+  color: #87958d;
+  font-size: 11px;
+  line-height: 1.5;
+}
 .payment-stats {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
