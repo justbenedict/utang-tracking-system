@@ -211,7 +211,46 @@ function startEditingCustomer(customer) {
   setSearch("");
   setMessage("");
 }
-  
+
+
+async function deleteCustomer(customer) {
+  const confirmed = window.confirm(
+    `Are you sure you want to delete ${customer.name}?\n\nThis action cannot be undone.`
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      `${API_URL}/customers/${customer.id}`,
+      {
+        method: "DELETE",
+      }
+    );
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      throw new Error(
+        result.message || "Failed to delete customer."
+      );
+    }
+
+    await loadCustomers();
+
+    if (editingCustomer?.id === customer.id) {
+      setEditingCustomer(null);
+    }
+
+    notify("Customer deleted successfully.");
+  } catch (error) {
+    console.error("Delete customer error:", error);
+    notify(error.message || "Failed to delete customer.");
+  }
+}
+
   
 async function addDebt(event) {
   event.preventDefault();
@@ -555,6 +594,7 @@ async function addPayment(event) {
                               <td><strong>{customer.name}</strong></td>
                               <td>{customer.phone || "—"}</td>
                               <td>{customer.address || "—"}</td>
+                              
                               <td>
                                 <button
                                   type="button"
@@ -563,7 +603,18 @@ async function addPayment(event) {
                                 >
                                   Edit
                                 </button>
+                                                        
+                                {" "}
+                                                        
+                                <button
+                                  type="button"
+                                  className="secondary-button"
+                                  onClick={() => deleteCustomer(customer)}
+                                >
+                                  Delete
+                                </button>
                               </td>
+
                             </tr>
                           ))}
                           {filteredCustomers.length === 0 && <EmptyRow columns={4} />}
