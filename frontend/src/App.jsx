@@ -915,8 +915,10 @@ function App() {
                         <th>Description</th>
                         <th>Payment date</th>
                         <th>Amount</th>
+                        <th>Notes</th>
                       </tr>
                     </thead>
+
                     <tbody>
                       {filteredPayments.map((payment) => (
                         <tr key={payment.id}>
@@ -928,10 +930,12 @@ function App() {
                           <td className="amount-positive">
                             {money(payment.amount)}
                           </td>
+                          <td>{payment.notes || "—"}</td>
                         </tr>
                       ))}
+
                       {filteredPayments.length === 0 && (
-                        <EmptyRow columns={4} />
+                        <EmptyRow columns={5} />
                       )}
                     </tbody>
                   </table>
