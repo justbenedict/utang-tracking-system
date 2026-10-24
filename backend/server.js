@@ -7,6 +7,15 @@ const pool = require("./db");
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+const isValidName = (value) =>
+  typeof value === "string" && /^[a-zA-ZÀ-ÿ\s'-]+$/.test(value.trim());
+
+const isValidContactNumber = (value) =>
+  typeof value === "string" && /^[0-9]+$/.test(value);
+
+const isValidAddress = (value) =>
+  typeof value === "string" && /^[a-zA-ZÀ-ÿ0-9\s,.'/]*$/.test(value);
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -15,7 +24,6 @@ app.use(express.json());
 app.get("/", (req, res) => {
   res.send("Utang Tracking System API is running!");
 });
-
 
 /* CUSTOMER CRUD */
 
@@ -32,13 +40,13 @@ app.get("/api/customers", async (req, res) => {
     res.status(200).json({
       success: true,
       count: result.rows.length,
-      data: result.rows
+      data: result.rows,
     });
   } catch (error) {
     console.error("Error retrieving customers:", error.message);
     res.status(500).json({
       success: false,
-      message: "Failed to retrieve customers."
+      message: "Failed to retrieve customers.",
     });
   }
 });
@@ -46,12 +54,7 @@ app.get("/api/customers", async (req, res) => {
 // POST: Register a customer
 app.post("/api/customers", async (req, res) => {
   try {
-    const {
-      first_name,
-      last_name,
-      contact_number,
-      address
-    } = req.body;
+    const { first_name, last_name, contact_number, address } = req.body;
 
     if (
       typeof first_name !== "string" ||
@@ -61,7 +64,52 @@ app.post("/api/customers", async (req, res) => {
     ) {
       return res.status(400).json({
         success: false,
-        message: "First name and last name are required."
+        message: "First name and last name are required.",
+      });
+    }
+
+    if (!isValidName(first_name) || !isValidName(last_name)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Names may contain letters, spaces, apostrophes, and hyphens only.",
+      });
+    }
+
+    // Validate optional contact number and address
+    if (contact_number != null && typeof contact_number !== "string") {
+      return res.status(400).json({
+        success: false,
+        message: "Contact number must be text.",
+      });
+    }
+
+    if (
+      contact_number != null &&
+      contact_number.trim() !== "" &&
+      !isValidContactNumber(contact_number.trim())
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Contact number must contain digits only.",
+      });
+    }
+
+    if (address != null && typeof address !== "string") {
+      return res.status(400).json({
+        success: false,
+        message: "Address must be text.",
+      });
+    }
+
+    if (
+      address != null &&
+      address.trim() !== "" &&
+      !isValidAddress(address.trim())
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Address contains unsupported characters.",
       });
     }
 
@@ -74,20 +122,20 @@ app.post("/api/customers", async (req, res) => {
         first_name.trim(),
         last_name.trim(),
         contact_number?.trim() || null,
-        address?.trim() || null
-      ]
+        address?.trim() || null,
+      ],
     );
 
     res.status(201).json({
       success: true,
       message: "Customer registered successfully.",
-      data: result.rows[0]
+      data: result.rows[0],
     });
   } catch (error) {
     console.error("Error registering customer:", error.message);
     res.status(500).json({
       success: false,
-      message: "Failed to register customer."
+      message: "Failed to register customer.",
     });
   }
 });
@@ -96,17 +144,12 @@ app.post("/api/customers", async (req, res) => {
 app.put("/api/customers/:id", async (req, res) => {
   try {
     const id = Number(req.params.id);
-    const {
-      first_name,
-      last_name,
-      contact_number,
-      address
-    } = req.body;
+    const { first_name, last_name, contact_number, address } = req.body;
 
     if (!Number.isInteger(id) || id < 1) {
       return res.status(400).json({
         success: false,
-        message: "Invalid customer ID."
+        message: "Invalid customer ID.",
       });
     }
 
@@ -118,7 +161,22 @@ app.put("/api/customers/:id", async (req, res) => {
     ) {
       return res.status(400).json({
         success: false,
-        message: "First name and last name are required."
+        message: "First name and last name are required.",
+      });
+    }
+
+    // Validate optional contact number and address
+    if (contact_number != null && typeof contact_number !== "string") {
+      return res.status(400).json({
+        success: false,
+        message: "Contact number must be text.",
+      });
+    }
+
+    if (address != null && typeof address !== "string") {
+      return res.status(400).json({
+        success: false,
+        message: "Address must be text.",
       });
     }
 
@@ -135,27 +193,27 @@ app.put("/api/customers/:id", async (req, res) => {
         last_name.trim(),
         contact_number?.trim() || null,
         address?.trim() || null,
-        id
-      ]
+        id,
+      ],
     );
 
     if (result.rowCount === 0) {
       return res.status(404).json({
         success: false,
-        message: "Customer not found."
+        message: "Customer not found.",
       });
     }
 
     res.status(200).json({
       success: true,
       message: "Customer updated successfully.",
-      data: result.rows[0]
+      data: result.rows[0],
     });
   } catch (error) {
     console.error("Error updating customer:", error.message);
     res.status(500).json({
       success: false,
-      message: "Failed to update customer."
+      message: "Failed to update customer.",
     });
   }
 });
@@ -168,7 +226,7 @@ app.delete("/api/customers/:id", async (req, res) => {
     if (!Number.isInteger(id) || id < 1) {
       return res.status(400).json({
         success: false,
-        message: "Invalid customer ID."
+        message: "Invalid customer ID.",
       });
     }
 
@@ -176,47 +234,40 @@ app.delete("/api/customers/:id", async (req, res) => {
       `DELETE FROM customers
        WHERE customer_id = $1
        RETURNING customer_id`,
-      [id]
+      [id],
     );
 
     if (result.rowCount === 0) {
       return res.status(404).json({
         success: false,
-        message: "Customer not found."
+        message: "Customer not found.",
       });
     }
 
     res.status(200).json({
       success: true,
-      message: "Customer deleted successfully."
+      message: "Customer deleted successfully.",
     });
   } catch (error) {
     if (error.code === "23503") {
       return res.status(409).json({
         success: false,
-        message: "This customer has debt records and cannot be deleted."
+        message: "This customer has debt records and cannot be deleted.",
       });
     }
 
     console.error("Error deleting customer:", error.message);
     res.status(500).json({
       success: false,
-      message: "Failed to delete customer."
+      message: "Failed to delete customer.",
     });
   }
 });
 
-
 /* POST: Save a debt record to PostgreSQL */
 app.post("/api/debts", async (req, res) => {
   try {
-    const {
-      customer_id,
-      amount,
-      description,
-      debt_date,
-      due_date
-    } = req.body;
+    const { customer_id, amount, description, debt_date, due_date } = req.body;
 
     const customerId = Number(customer_id);
     const debtAmount = Number(amount);
@@ -224,42 +275,41 @@ app.post("/api/debts", async (req, res) => {
     if (!Number.isInteger(customerId) || customerId < 1) {
       return res.status(400).json({
         success: false,
-        message: "Please select a valid customer."
+        message: "Please select a valid customer.",
       });
     }
 
     if (!Number.isFinite(debtAmount) || debtAmount <= 0) {
       return res.status(400).json({
         success: false,
-        message: "Debt amount must be greater than zero."
+        message: "Debt amount must be greater than zero.",
       });
     }
 
     if (
-  typeof description !== "string" ||
-  !description.trim() ||
-  typeof debt_date !== "string" ||
-  !/^\d{4}-\d{2}-\d{2}$/.test(debt_date)
-) {
-  return res.status(400).json({
-    success: false,
-    message: "A description and valid debt date are required."
-  });
-}
-
-const debtDate = new Date(`${debt_date}T00:00:00.000Z`);
-
-if (
-  Number.isNaN(debtDate.getTime()) ||
-  debtDate.toISOString().slice(0, 10) !== debt_date
-) {
-  return res.status(400).json({
-    success: false,
-    message: "Debt date is invalid."
-  });
+      typeof description !== "string" ||
+      !description.trim() ||
+      typeof debt_date !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(debt_date)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "A description and valid debt date are required.",
+      });
     }
-    
-    
+
+    const debtDate = new Date(`${debt_date}T00:00:00.000Z`);
+
+    if (
+      Number.isNaN(debtDate.getTime()) ||
+      debtDate.toISOString().slice(0, 10) !== debt_date
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Debt date is invalid.",
+      });
+    }
+
     // Validate optional due date
     if (due_date != null && due_date !== "") {
       if (
@@ -268,7 +318,7 @@ if (
       ) {
         return res.status(400).json({
           success: false,
-          message: "A valid due date is required."
+          message: "A valid due date is required.",
         });
       }
 
@@ -280,11 +330,10 @@ if (
       ) {
         return res.status(400).json({
           success: false,
-          message: "Due date is invalid."
+          message: "Due date is invalid.",
         });
       }
     }
-
 
     const result = await pool.query(
       `INSERT INTO debts
@@ -297,14 +346,14 @@ if (
         description.trim(),
         debt_date,
         due_date || null,
-        "Unpaid"
-      ]
+        "Unpaid",
+      ],
     );
 
     res.status(201).json({
       success: true,
       message: "Debt saved successfully.",
-      data: result.rows[0]
+      data: result.rows[0],
     });
   } catch (error) {
     console.error("Error saving debt:", error.message);
@@ -312,17 +361,16 @@ if (
     if (error.code === "23503") {
       return res.status(400).json({
         success: false,
-        message: "The selected customer does not exist."
+        message: "The selected customer does not exist.",
       });
     }
 
     res.status(500).json({
       success: false,
-      message: "Failed to save debt record."
+      message: "Failed to save debt record.",
     });
   }
 });
-
 
 // GET API: Retrieve debt records from PostgreSQL
 app.get("/api/debts", async (req, res) => {
@@ -352,35 +400,27 @@ app.get("/api/debts", async (req, res) => {
       ORDER BY debts.debt_id DESC
     `);
 
-
     res.status(200).json({
       success: true,
       count: result.rows.length,
-      data: result.rows
+      data: result.rows,
     });
   } catch (error) {
     console.error("Error retrieving debts:", error.message);
 
     res.status(500).json({
       success: false,
-      message: "Failed to retrieve debt records."
+      message: "Failed to retrieve debt records.",
     });
   }
 });
-
 
 /* PUT: Update an existing debt */
 app.put("/api/debts/:id", async (req, res) => {
   try {
     const id = Number(req.params.id);
 
-    const {
-      customer_id,
-      amount,
-      description,
-      debt_date,
-      due_date
-    } = req.body;
+    const { customer_id, amount, description, debt_date, due_date } = req.body;
 
     const customerId = Number(customer_id);
     const debtAmount = Number(amount);
@@ -389,7 +429,7 @@ app.put("/api/debts/:id", async (req, res) => {
     if (!Number.isInteger(id) || id < 1) {
       return res.status(400).json({
         success: false,
-        message: "Invalid debt ID."
+        message: "Invalid debt ID.",
       });
     }
 
@@ -397,7 +437,7 @@ app.put("/api/debts/:id", async (req, res) => {
     if (!Number.isInteger(customerId) || customerId < 1) {
       return res.status(400).json({
         success: false,
-        message: "Please select a valid customer."
+        message: "Please select a valid customer.",
       });
     }
 
@@ -405,13 +445,12 @@ app.put("/api/debts/:id", async (req, res) => {
     if (!Number.isFinite(debtAmount) || debtAmount <= 0) {
       return res.status(400).json({
         success: false,
-        message: "Debt amount must be greater than zero."
+        message: "Debt amount must be greater than zero.",
       });
     }
 
     // Validate description and dates
 
-    
     // Validate optional due date
     if (due_date != null && due_date !== "") {
       if (
@@ -420,7 +459,7 @@ app.put("/api/debts/:id", async (req, res) => {
       ) {
         return res.status(400).json({
           success: false,
-          message: "A valid due date is required."
+          message: "A valid due date is required.",
         });
       }
 
@@ -432,12 +471,11 @@ app.put("/api/debts/:id", async (req, res) => {
       ) {
         return res.status(400).json({
           success: false,
-          message: "Due date is invalid."
+          message: "Due date is invalid.",
         });
       }
     }
 
-    
     // Validate description and debt date format
     if (
       typeof description !== "string" ||
@@ -447,7 +485,7 @@ app.put("/api/debts/:id", async (req, res) => {
     ) {
       return res.status(400).json({
         success: false,
-        message: "A description and valid debt date are required."
+        message: "A description and valid debt date are required.",
       });
     }
 
@@ -460,12 +498,10 @@ app.put("/api/debts/:id", async (req, res) => {
     ) {
       return res.status(400).json({
         success: false,
-        message: "Debt date is invalid."
+        message: "Debt date is invalid.",
       });
     }
 
-
-    
     // Check that the debt exists and calculate payments already made
     const debtResult = await pool.query(
       `SELECT
@@ -476,25 +512,22 @@ app.put("/api/debts/:id", async (req, res) => {
          ON payments.debt_id = debts.debt_id
        WHERE debts.debt_id = $1
        GROUP BY debts.debt_id`,
-      [id]
+      [id],
     );
 
     if (debtResult.rowCount === 0) {
       return res.status(404).json({
         success: false,
-        message: "Debt record not found."
+        message: "Debt record not found.",
       });
     }
 
     const totalPaid = Number(debtResult.rows[0].total_paid);
 
-    if (
-      Math.round(debtAmount * 100) <
-      Math.round(totalPaid * 100)
-    ) {
+    if (Math.round(debtAmount * 100) < Math.round(totalPaid * 100)) {
       return res.status(400).json({
         success: false,
-        message: `Debt amount cannot be less than the total already paid (${totalPaid.toFixed(2)}).`
+        message: `Debt amount cannot be less than the total already paid (${totalPaid.toFixed(2)}).`,
       });
     }
 
@@ -513,22 +546,21 @@ app.put("/api/debts/:id", async (req, res) => {
         description.trim(),
         debt_date,
         due_date || null,
-        id
-      ]
+        id,
+      ],
     );
-
 
     if (result.rowCount === 0) {
       return res.status(404).json({
         success: false,
-        message: "Debt record not found."
+        message: "Debt record not found.",
       });
     }
 
     res.status(200).json({
       success: true,
       message: "Debt updated successfully.",
-      data: result.rows[0]
+      data: result.rows[0],
     });
   } catch (error) {
     console.error("Error updating debt:", error.message);
@@ -536,17 +568,16 @@ app.put("/api/debts/:id", async (req, res) => {
     if (error.code === "23503") {
       return res.status(400).json({
         success: false,
-        message: "The selected customer does not exist."
+        message: "The selected customer does not exist.",
       });
     }
 
     res.status(500).json({
       success: false,
-      message: "Failed to update debt record."
+      message: "Failed to update debt record.",
     });
   }
 });
-
 
 /* DELETE: Remove a debt without payment history */
 app.delete("/api/debts/:id", async (req, res) => {
@@ -570,7 +601,7 @@ app.delete("/api/debts/:id", async (req, res) => {
        FROM debts
        WHERE debt_id = $1
        FOR UPDATE`,
-      [id]
+      [id],
     );
 
     if (debtResult.rowCount === 0) {
@@ -588,7 +619,7 @@ app.delete("/api/debts/:id", async (req, res) => {
        FROM payments
        WHERE debt_id = $1
        LIMIT 1`,
-      [id]
+      [id],
     );
 
     if (paymentResult.rowCount > 0) {
@@ -596,16 +627,12 @@ app.delete("/api/debts/:id", async (req, res) => {
 
       return res.status(409).json({
         success: false,
-        message:
-          "This debt cannot be deleted because it has payment history.",
+        message: "This debt cannot be deleted because it has payment history.",
       });
     }
 
     // Delete the debt only after the safeguards pass.
-    await client.query(
-      "DELETE FROM debts WHERE debt_id = $1",
-      [id]
-    );
+    await client.query("DELETE FROM debts WHERE debt_id = $1", [id]);
 
     await client.query("COMMIT");
 
@@ -637,7 +664,6 @@ app.delete("/api/debts/:id", async (req, res) => {
   }
 });
 
-
 /* PAYMENT HISTORY */
 
 // GET: Retrieve payment records from PostgreSQL
@@ -666,18 +692,17 @@ app.get("/api/payments", async (req, res) => {
     res.status(200).json({
       success: true,
       count: result.rows.length,
-      data: result.rows
+      data: result.rows,
     });
   } catch (error) {
     console.error("Error retrieving payments:", error.message);
 
     res.status(500).json({
       success: false,
-      message: "Failed to retrieve payment records."
+      message: "Failed to retrieve payment records.",
     });
   }
 });
-
 
 /* POST: Record a payment */
 
@@ -690,14 +715,14 @@ app.post("/api/payments", async (req, res) => {
   if (!Number.isInteger(debtId) || debtId < 1) {
     return res.status(400).json({
       success: false,
-      message: "Please select a valid debt."
+      message: "Please select a valid debt.",
     });
   }
 
   if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
     return res.status(400).json({
       success: false,
-      message: "Payment amount must be greater than zero."
+      message: "Payment amount must be greater than zero.",
     });
   }
 
@@ -707,7 +732,7 @@ app.post("/api/payments", async (req, res) => {
   ) {
     return res.status(400).json({
       success: false,
-      message: "A valid payment date is required."
+      message: "A valid payment date is required.",
     });
   }
 
@@ -719,14 +744,14 @@ app.post("/api/payments", async (req, res) => {
   ) {
     return res.status(400).json({
       success: false,
-      message: "Payment date is invalid."
+      message: "Payment date is invalid.",
     });
   }
 
   if (notes != null && typeof notes !== "string") {
     return res.status(400).json({
       success: false,
-      message: "Payment notes must be text."
+      message: "Payment notes must be text.",
     });
   }
 
@@ -740,7 +765,7 @@ app.post("/api/payments", async (req, res) => {
        FROM debts
        WHERE debt_id = $1
        FOR UPDATE`,
-      [debtId]
+      [debtId],
     );
 
     if (debtResult.rowCount === 0) {
@@ -748,7 +773,7 @@ app.post("/api/payments", async (req, res) => {
 
       return res.status(404).json({
         success: false,
-        message: "Debt not found."
+        message: "Debt not found.",
       });
     }
 
@@ -758,7 +783,7 @@ app.post("/api/payments", async (req, res) => {
       `SELECT COALESCE(SUM(amount), 0) AS total_paid
        FROM payments
        WHERE debt_id = $1`,
-      [debtId]
+      [debtId],
     );
 
     const totalPaid = Number(paidResult.rows[0].total_paid);
@@ -770,7 +795,7 @@ app.post("/api/payments", async (req, res) => {
 
       return res.status(409).json({
         success: false,
-        message: "This debt has already been fully paid."
+        message: "This debt has already been fully paid.",
       });
     }
 
@@ -779,7 +804,7 @@ app.post("/api/payments", async (req, res) => {
 
       return res.status(400).json({
         success: false,
-        message: `Payment exceeds the remaining balance of ${remaining.toFixed(2)}.`
+        message: `Payment exceeds the remaining balance of ${remaining.toFixed(2)}.`,
       });
     }
 
@@ -788,27 +813,18 @@ app.post("/api/payments", async (req, res) => {
         (debt_id, amount, payment_date, notes)
        VALUES ($1, $2, $3, $4)
        RETURNING *`,
-      [
-        debtId,
-        paymentAmount,
-        payment_date,
-        notes?.trim() || null
-      ]
+      [debtId, paymentAmount, payment_date, notes?.trim() || null],
     );
 
-    const newTotalPaid =
-      Math.round((totalPaid + paymentAmount) * 100) / 100;
+    const newTotalPaid = Math.round((totalPaid + paymentAmount) * 100) / 100;
 
-    const newStatus =
-      newTotalPaid >= debtAmount
-        ? "Paid"
-        : "Partially Paid";
+    const newStatus = newTotalPaid >= debtAmount ? "Paid" : "Partially Paid";
 
     await client.query(
       `UPDATE debts
        SET status = $1
        WHERE debt_id = $2`,
-      [newStatus, debtId]
+      [newStatus, debtId],
     );
 
     await client.query("COMMIT");
@@ -818,9 +834,8 @@ app.post("/api/payments", async (req, res) => {
       message: "Payment recorded successfully.",
       data: paymentResult.rows[0],
       total_paid: newTotalPaid,
-      remaining_balance:
-        Math.round((debtAmount - newTotalPaid) * 100) / 100,
-      debt_status: newStatus
+      remaining_balance: Math.round((debtAmount - newTotalPaid) * 100) / 100,
+      debt_status: newStatus,
     });
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
@@ -829,13 +844,12 @@ app.post("/api/payments", async (req, res) => {
 
     res.status(500).json({
       success: false,
-      message: "Failed to record payment."
+      message: "Failed to record payment.",
     });
   } finally {
     client.release();
   }
 });
-
 
 /* PUT: Update an existing payment */
 
@@ -848,7 +862,7 @@ app.put("/api/payments/:id", async (req, res) => {
   if (!Number.isInteger(paymentId) || paymentId < 1) {
     return res.status(400).json({
       success: false,
-      message: "Invalid payment ID."
+      message: "Invalid payment ID.",
     });
   }
 
@@ -856,7 +870,7 @@ app.put("/api/payments/:id", async (req, res) => {
   if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
     return res.status(400).json({
       success: false,
-      message: "Payment amount must be greater than zero."
+      message: "Payment amount must be greater than zero.",
     });
   }
 
@@ -867,7 +881,7 @@ app.put("/api/payments/:id", async (req, res) => {
   ) {
     return res.status(400).json({
       success: false,
-      message: "A valid payment date is required."
+      message: "A valid payment date is required.",
     });
   }
 
@@ -879,14 +893,14 @@ app.put("/api/payments/:id", async (req, res) => {
   ) {
     return res.status(400).json({
       success: false,
-      message: "Payment date is invalid."
+      message: "Payment date is invalid.",
     });
   }
 
   if (notes != null && typeof notes !== "string") {
     return res.status(400).json({
       success: false,
-      message: "Payment notes must be text."
+      message: "Payment notes must be text.",
     });
   }
 
@@ -900,7 +914,7 @@ app.put("/api/payments/:id", async (req, res) => {
       `SELECT payment_id, debt_id
        FROM payments
        WHERE payment_id = $1`,
-      [paymentId]
+      [paymentId],
     );
 
     if (paymentResult.rowCount === 0) {
@@ -908,7 +922,7 @@ app.put("/api/payments/:id", async (req, res) => {
 
       return res.status(404).json({
         success: false,
-        message: "Payment not found."
+        message: "Payment not found.",
       });
     }
 
@@ -921,7 +935,7 @@ app.put("/api/payments/:id", async (req, res) => {
        FROM debts
        WHERE debt_id = $1
        FOR UPDATE`,
-      [debtId]
+      [debtId],
     );
 
     if (debtResult.rowCount === 0) {
@@ -929,7 +943,7 @@ app.put("/api/payments/:id", async (req, res) => {
 
       return res.status(404).json({
         success: false,
-        message: "Related debt not found."
+        message: "Related debt not found.",
       });
     }
 
@@ -941,19 +955,18 @@ app.put("/api/payments/:id", async (req, res) => {
        FROM payments
        WHERE debt_id = $1
          AND payment_id <> $2`,
-      [debtId, paymentId]
+      [debtId, paymentId],
     );
 
     const otherPayments = Number(paidResult.rows[0].total_paid);
-    const remaining =
-      Math.round((debtAmount - otherPayments) * 100) / 100;
+    const remaining = Math.round((debtAmount - otherPayments) * 100) / 100;
 
     if (Math.round(paymentAmount * 100) > Math.round(remaining * 100)) {
       await client.query("ROLLBACK");
 
       return res.status(400).json({
         success: false,
-        message: `Payment exceeds the available balance of ${remaining.toFixed(2)}.`
+        message: `Payment exceeds the available balance of ${remaining.toFixed(2)}.`,
       });
     }
 
@@ -965,12 +978,7 @@ app.put("/api/payments/:id", async (req, res) => {
            notes = $3
        WHERE payment_id = $4
        RETURNING *`,
-      [
-        paymentAmount,
-        payment_date,
-        notes?.trim() || null,
-        paymentId
-      ]
+      [paymentAmount, payment_date, notes?.trim() || null, paymentId],
     );
 
     // Recalculate the total and debt status.
@@ -988,7 +996,7 @@ app.put("/api/payments/:id", async (req, res) => {
       `UPDATE debts
        SET status = $1
        WHERE debt_id = $2`,
-      [newStatus, debtId]
+      [newStatus, debtId],
     );
 
     await client.query("COMMIT");
@@ -998,9 +1006,8 @@ app.put("/api/payments/:id", async (req, res) => {
       message: "Payment updated successfully.",
       data: updatedPayment.rows[0],
       total_paid: newTotalPaid,
-      remaining_balance:
-        Math.round((debtAmount - newTotalPaid) * 100) / 100,
-      debt_status: newStatus
+      remaining_balance: Math.round((debtAmount - newTotalPaid) * 100) / 100,
+      debt_status: newStatus,
     });
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
@@ -1009,13 +1016,12 @@ app.put("/api/payments/:id", async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Failed to update payment."
+      message: "Failed to update payment.",
     });
   } finally {
     client.release();
   }
 });
-
 
 // Start the server
 app.listen(PORT, () => {

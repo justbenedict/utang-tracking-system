@@ -688,6 +688,12 @@ function App() {
                     required
                     placeholder="e.g. Juan"
                     defaultValue={editingCustomer?.firstName || ""}
+                    onInput={(event) => {
+                      event.target.value = event.target.value.replace(
+                        /[^a-zA-ZÀ-ÿ\s'-]/g,
+                        "",
+                      );
+                    }}
                   />
                   <Field
                     label="Last name"
@@ -695,19 +701,44 @@ function App() {
                     required
                     placeholder="e.g. Dela Cruz"
                     defaultValue={editingCustomer?.lastName || ""}
+                    onInput={(event) => {
+                      event.target.value = event.target.value.replace(
+                        /[^a-zA-ZÀ-ÿ\s'-]/g,
+                        "",
+                      );
+                    }}
                   />
                   <Field
                     label="Contact number"
                     name="phone"
+                    type="tel"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={11}
                     placeholder="09XXXXXXXXX"
                     defaultValue={editingCustomer?.phone || ""}
+                    onInput={(event) => {
+                      event.target.value = event.target.value.replace(
+                        /\D/g,
+                        "",
+                      );
+                    }}
                   />
+
                   <Field
                     label="Address"
                     name="address"
-                    placeholder="City or barangay"
+                    placeholder="e.g. San Roque, Macrohon"
                     defaultValue={editingCustomer?.address || ""}
+                    maxLength={150}
+                    onInput={(event) => {
+                      event.target.value = event.target.value.replace(
+                        /[^a-zA-ZÀ-ÿ0-9\s,.'/-]/g,
+                        "",
+                      );
+                    }}
                   />
+
                   <button className="primary-button form-submit" type="submit">
                     {editingCustomer ? "Save changes" : "＋ Add customer"}
                   </button>
