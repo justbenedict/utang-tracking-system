@@ -413,6 +413,39 @@ function App() {
     setMessage("");
   }
 
+  async function deletePayment(payment) {
+    const confirmed = window.confirm(
+      `Are you sure you want to delete this payment?\n\nCustomer: ${payment.customer}\nDescription: ${payment.description}\nAmount: ${money(payment.amount)}\n\nThis action cannot be undone.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/payments/${payment.id}`, {
+        method: "DELETE",
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Failed to delete payment.");
+      }
+
+      await Promise.all([loadDebts(), loadPayments()]);
+
+      if (editingPayment?.id === payment.id) {
+        setEditingPayment(null);
+      }
+
+      notify("Payment deleted successfully.");
+    } catch (error) {
+      console.error("Delete payment error:", error);
+      notify(error.message || "Failed to delete payment.");
+    }
+  }
+
   async function addPayment(event) {
     event.preventDefault();
 
@@ -1037,6 +1070,7 @@ function App() {
                             {money(payment.amount)}
                           </td>
                           <td>{payment.notes || "—"}</td>
+
                           <td>
                             <button
                               className="secondary-button"
@@ -1044,6 +1078,13 @@ function App() {
                               onClick={() => startEditingPayment(payment)}
                             >
                               Edit
+                            </button>{" "}
+                            <button
+                              className="secondary-button"
+                              type="button"
+                              onClick={() => deletePayment(payment)}
+                            >
+                              Delete
                             </button>
                           </td>
                         </tr>
@@ -1183,12 +1224,14 @@ function App() {
                   label="Total Debt"
                   value={money(reportTotalDebt)}
                   detail="Debts created in selected period"
+                  icon="▤"
                 />
 
                 <StatCard
                   label="Payments Collected"
                   value={money(reportPaymentsCollected)}
                   detail="Payments received in selected period"
+                  icon="✓"
                 />
 
                 <StatCard
@@ -1201,18 +1244,21 @@ function App() {
                   label="Outstanding Balance"
                   value={money(reportOutstandingBalance)}
                   detail="Current balance of filtered debts"
+                  icon="◷"
                 />
 
                 <StatCard
                   label="Overdue Balance"
                   value={money(reportOverdueBalance)}
                   detail="Overdue balance of filtered debts"
+                  icon="!"
                 />
 
                 <StatCard
                   label="Overdue Debt Records"
                   value={reportOverdueCount}
                   detail="Overdue debts in the selected period"
+                  icon="!"
                 />
               </div>
 

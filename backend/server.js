@@ -1023,6 +1023,124 @@ app.put("/api/payments/:id", async (req, res) => {
   }
 });
 
+/* DELETE: Remove a payment and recalculate debt status */
+
+app.delete("/api/payments/:id", async (req, res) => {
+  const paymentId = Number(req.params.id);
+  let client;
+
+  if (!Number.isInteger(paymentId) || paymentId < 1) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid payment ID.",
+    });
+  }
+
+  try {
+    client = await pool.connect();
+    await client.query("BEGIN");
+
+    // Find the payment and identify its debt.
+    const paymentResult = await client.query(
+      `SELECT payment_id, debt_id
+       FROM payments
+       WHERE payment_id = $1`,
+      [paymentId],
+    );
+
+    if (paymentResult.rowCount === 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        success: false,
+        message: "Payment not found.",
+      });
+    }
+
+    const debtId = paymentResult.rows[0].debt_id;
+
+    // Lock the debt while recalculating its balance and status.
+    const debtResult = await client.query(
+      `SELECT debt_id, amount
+       FROM debts
+       WHERE debt_id = $1
+       FOR UPDATE`,
+      [debtId],
+    );
+
+    if (debtResult.rowCount === 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        success: false,
+        message: "Related debt not found.",
+      });
+    }
+
+    const debtAmount = Number(debtResult.rows[0].amount);
+
+    // Delete the selected payment from PostgreSQL.
+    await client.query(
+      `DELETE FROM payments
+       WHERE payment_id = $1`,
+      [paymentId],
+    );
+
+    // Recalculate payments remaining after deletion.
+    const paidResult = await client.query(
+      `SELECT COALESCE(SUM(amount), 0) AS total_paid
+       FROM payments
+       WHERE debt_id = $1`,
+      [debtId],
+    );
+
+    const totalPaid =
+      Math.round(Number(paidResult.rows[0].total_paid) * 100) / 100;
+
+    const remainingBalance = Math.round((debtAmount - totalPaid) * 100) / 100;
+
+    const newStatus =
+      totalPaid >= debtAmount
+        ? "Paid"
+        : totalPaid > 0
+          ? "Partially Paid"
+          : "Unpaid";
+
+    // Update the debt's status.
+    await client.query(
+      `UPDATE debts
+       SET status = $1
+       WHERE debt_id = $2`,
+      [newStatus, debtId],
+    );
+
+    await client.query("COMMIT");
+
+    return res.status(200).json({
+      success: true,
+      message: "Payment deleted successfully.",
+      payment_id: paymentId,
+      debt_id: debtId,
+      total_paid: totalPaid,
+      remaining_balance: remainingBalance,
+      debt_status: newStatus,
+    });
+  } catch (error) {
+    if (client) {
+      await client.query("ROLLBACK").catch(() => {});
+    }
+
+    console.error("Error deleting payment:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete payment.",
+    });
+  } finally {
+    client?.release();
+  }
+});
+
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
