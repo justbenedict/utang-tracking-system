@@ -1783,7 +1783,7 @@ app.post(
 app.put(
   "/api/payments/:id",
   authenticateToken,
-  authorizeRoles("admin", "staff"),
+  authorizeRoles("admin"),
   async (req, res) => {
     const paymentId = Number(req.params.id);
     const { amount, payment_date, notes } = req.body;
@@ -1984,7 +1984,7 @@ app.put(
 app.delete(
   "/api/payments/:id",
   authenticateToken,
-  authorizeRoles("admin", "staff"),
+  authorizeRoles("admin"),
   async (req, res) => {
     const paymentId = Number(req.params.id);
     let client;
@@ -2000,10 +2000,9 @@ app.delete(
       client = await pool.connect();
       await client.query("BEGIN");
 
-      // Find the payment and identify its debt.
-
+      // Find and lock the payment before modifying it.
       const paymentResult = await client.query(
-        `SELECT payment_id, debt_id
+        `SELECT payment_id, debt_id, amount, payment_date, notes, created_at
          FROM payments
          WHERE payment_id = $1
          FOR UPDATE`,
@@ -2019,36 +2018,15 @@ app.delete(
         });
       }
 
-      // Staff can delete payments only for assigned customers.
-      if (req.user.role === "staff") {
-        const assignmentResult = await client.query(
-          `SELECT 1
-           FROM staff_assignments AS sa
-           INNER JOIN debts AS d
-             ON d.customer_id = sa.customer_id
-           WHERE sa.staff_user_id = $1
-             AND d.debt_id = $2`,
-          [req.user.userId, paymentResult.rows[0].debt_id],
-        );
+      const payment = paymentResult.rows[0];
+      const debtId = payment.debt_id;
 
-        if (assignmentResult.rowCount === 0) {
-          await client.query("ROLLBACK");
-
-          return res.status(403).json({
-            success: false,
-            message: "You are not assigned to this payment's customer.",
-          });
-        }
-      }
-
-      const debtId = paymentResult.rows[0].debt_id;
-
-      // Lock the debt while recalculating its balance and status.
+      // Lock the related debt.
       const debtResult = await client.query(
-        `SELECT debt_id, amount
-       FROM debts
-       WHERE debt_id = $1
-       FOR UPDATE`,
+        `SELECT debt_id, customer_id, amount
+         FROM debts
+         WHERE debt_id = $1
+         FOR UPDATE`,
         [debtId],
       );
 
@@ -2061,20 +2039,41 @@ app.delete(
         });
       }
 
-      const debtAmount = Number(debtResult.rows[0].amount);
+      const debt = debtResult.rows[0];
+      const debtAmount = Number(debt.amount);
 
-      // Delete the selected payment from PostgreSQL.
+      // Record the original payment details before deletion.
+      await writeAuditLog(client, {
+        actorUserId: req.user.userId,
+        customerId: debt.customer_id,
+        debtId,
+        paymentId,
+        action: "PAYMENT_DELETED",
+        entityType: "payment",
+        entityId: paymentId,
+        oldValues: {
+          amount: payment.amount,
+          payment_date: payment.payment_date,
+          notes: payment.notes,
+          debt_id: payment.debt_id,
+          created_at: payment.created_at,
+        },
+        newValues: null,
+        reason: "Payment deleted by administrator",
+      });
+
+      // Delete the payment.
       await client.query(
         `DELETE FROM payments
-       WHERE payment_id = $1`,
+         WHERE payment_id = $1`,
         [paymentId],
       );
 
-      // Recalculate payments remaining after deletion.
+      // Recalculate the remaining payments.
       const paidResult = await client.query(
         `SELECT COALESCE(SUM(amount), 0) AS total_paid
-       FROM payments
-       WHERE debt_id = $1`,
+         FROM payments
+         WHERE debt_id = $1`,
         [debtId],
       );
 
@@ -2090,11 +2089,10 @@ app.delete(
             ? "Partially Paid"
             : "Unpaid";
 
-      // Update the debt's status.
       await client.query(
         `UPDATE debts
-       SET status = $1
-       WHERE debt_id = $2`,
+         SET status = $1
+         WHERE debt_id = $2`,
         [newStatus, debtId],
       );
 
