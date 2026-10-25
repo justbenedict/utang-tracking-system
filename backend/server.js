@@ -1156,153 +1156,141 @@ app.get(
   },
 );
 
-/* PUT: Update an existing debt */
+/* PUT: Update an existing debt with audit logging */
 app.put(
   "/api/debts/:id",
   authenticateToken,
   authorizeRoles("admin", "staff"),
   async (req, res) => {
+    const id = Number(req.params.id);
+    const { customer_id, amount, description, debt_date, due_date } = req.body;
+
+    const customerId = Number(customer_id);
+    const debtAmount = Number(amount);
+
+    if (!Number.isInteger(id) || id < 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid debt ID.",
+      });
+    }
+
+    if (!Number.isInteger(customerId) || customerId < 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Please select a valid customer.",
+      });
+    }
+
+    if (!Number.isFinite(debtAmount) || debtAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Debt amount must be greater than zero.",
+      });
+    }
+
+    if (
+      typeof description !== "string" ||
+      !description.trim() ||
+      typeof debt_date !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(debt_date)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "A description and valid debt date are required.",
+      });
+    }
+
+    const debtDate = new Date(`${debt_date}T00:00:00.000Z`);
+
+    if (
+      Number.isNaN(debtDate.getTime()) ||
+      debtDate.toISOString().slice(0, 10) !== debt_date
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Debt date is invalid.",
+      });
+    }
+
+    if (due_date != null && due_date !== "") {
+      if (
+        typeof due_date !== "string" ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(due_date)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "A valid due date is required.",
+        });
+      }
+
+      const dueDate = new Date(`${due_date}T00:00:00.000Z`);
+
+      if (
+        Number.isNaN(dueDate.getTime()) ||
+        dueDate.toISOString().slice(0, 10) !== due_date
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Due date is invalid.",
+        });
+      }
+    }
+
+    let client;
+
     try {
-      const id = Number(req.params.id);
+      client = await pool.connect();
+      await client.query("BEGIN");
 
-      const { customer_id, amount, description, debt_date, due_date } =
-        req.body;
-
-      const customerId = Number(customer_id);
-      const debtAmount = Number(amount);
-
-      // Validate debt ID
-      if (!Number.isInteger(id) || id < 1) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid debt ID.",
-        });
-      }
-
-      // Validate customer
-      if (!Number.isInteger(customerId) || customerId < 1) {
-        return res.status(400).json({
-          success: false,
-          message: "Please select a valid customer.",
-        });
-      }
-
-      // Validate amount
-      if (!Number.isFinite(debtAmount) || debtAmount <= 0) {
-        return res.status(400).json({
-          success: false,
-          message: "Debt amount must be greater than zero.",
-        });
-      }
-
-      // Validate description and dates
-
-      // Validate optional due date
-      if (due_date != null && due_date !== "") {
-        if (
-          typeof due_date !== "string" ||
-          !/^\d{4}-\d{2}-\d{2}$/.test(due_date)
-        ) {
-          return res.status(400).json({
-            success: false,
-            message: "A valid due date is required.",
-          });
-        }
-
-        const dueDate = new Date(`${due_date}T00:00:00.000Z`);
-
-        if (
-          Number.isNaN(dueDate.getTime()) ||
-          dueDate.toISOString().slice(0, 10) !== due_date
-        ) {
-          return res.status(400).json({
-            success: false,
-            message: "Due date is invalid.",
-          });
-        }
-      }
-
-      // Validate description and debt date format
-      if (
-        typeof description !== "string" ||
-        !description.trim() ||
-        typeof debt_date !== "string" ||
-        !/^\d{4}-\d{2}-\d{2}$/.test(debt_date)
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "A description and valid debt date are required.",
-        });
-      }
-
-      // Validate that the debt date exists on the calendar
-      const debtDate = new Date(`${debt_date}T00:00:00.000Z`);
-
-      if (
-        Number.isNaN(debtDate.getTime()) ||
-        debtDate.toISOString().slice(0, 10) !== debt_date
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "Debt date is invalid.",
-        });
-      }
-
-      // Check that the debt exists and calculate payments already made
-
-      const debtResult = await pool.query(
+      // Lock the debt so its details and payments cannot be
+      // inconsistently changed during this update.
+      const debtResult = await client.query(
         `SELECT
-     debts.debt_id,
-     debts.customer_id,
-     debts.amount,
-     debts.description,
-     debts.debt_date,
-     debts.due_date,
-     COALESCE(SUM(payments.amount), 0) AS total_paid
-   FROM debts
-   LEFT JOIN payments
-     ON payments.debt_id = debts.debt_id
-   WHERE debts.debt_id = $1
-   GROUP BY
-     debts.debt_id,
-     debts.customer_id,
-     debts.amount,
-     debts.description,
-     debts.debt_date,
-     debts.due_date`,
+           debt_id,
+           customer_id,
+           amount,
+           description,
+           debt_date,
+           due_date
+         FROM debts
+         WHERE debt_id = $1
+         FOR UPDATE`,
         [id],
       );
 
       if (debtResult.rowCount === 0) {
+        await client.query("ROLLBACK");
+
         return res.status(404).json({
           success: false,
           message: "Debt record not found.",
         });
       }
 
-      // Staff can update only debts belonging to assigned customers.
+      const existingDebt = debtResult.rows[0];
+
+      // Staff may update only debts belonging to assigned customers.
       if (req.user.role === "staff") {
-        const assignmentResult = await pool.query(
+        const assignmentResult = await client.query(
           `SELECT 1
            FROM staff_assignments
            WHERE staff_user_id = $1
-             AND customer_id = (
-               SELECT customer_id
-               FROM debts
-               WHERE debt_id = $2
-             )`,
-          [req.user.userId, id],
+             AND customer_id = $2`,
+          [req.user.userId, existingDebt.customer_id],
         );
 
         if (assignmentResult.rowCount === 0) {
+          await client.query("ROLLBACK");
+
           return res.status(403).json({
             success: false,
             message: "You are not assigned to this debt's customer.",
           });
         }
 
-        // Staff cannot move a debt to an unassigned customer.
-        const targetAssignmentResult = await pool.query(
+        // Staff cannot move a debt to another unassigned customer.
+        const targetAssignmentResult = await client.query(
           `SELECT 1
            FROM staff_assignments
            WHERE staff_user_id = $1
@@ -1311,46 +1299,58 @@ app.put(
         );
 
         if (targetAssignmentResult.rowCount === 0) {
+          await client.query("ROLLBACK");
+
           return res.status(403).json({
             success: false,
             message: "You are not assigned to the selected customer.",
           });
         }
-      }
 
-      const existingDebt = debtResult.rows[0];
-
-      // Staff cannot change the original principal amount.
-      if (
-        req.user.role === "staff" &&
-        Math.round(Number(amount) * 100) !==
+        // Staff cannot change the original principal amount.
+        if (
+          Math.round(debtAmount * 100) !==
           Math.round(Number(existingDebt.amount) * 100)
-      ) {
-        return res.status(403).json({
-          success: false,
-          message:
-            "Staff cannot change the original debt amount. Please request Admin approval.",
-        });
+        ) {
+          await client.query("ROLLBACK");
+
+          return res.status(403).json({
+            success: false,
+            message:
+              "Staff cannot change the original debt amount. Please request Admin approval.",
+          });
+        }
       }
 
-      const totalPaid = Number(debtResult.rows[0].total_paid);
+      // Calculate the total already paid.
+      const paidResult = await client.query(
+        `SELECT COALESCE(SUM(amount), 0) AS total_paid
+         FROM payments
+         WHERE debt_id = $1`,
+        [id],
+      );
+
+      const totalPaid = Number(paidResult.rows[0].total_paid);
 
       if (Math.round(debtAmount * 100) < Math.round(totalPaid * 100)) {
+        await client.query("ROLLBACK");
+
         return res.status(400).json({
           success: false,
           message: `Debt amount cannot be less than the total already paid (${totalPaid.toFixed(2)}).`,
         });
       }
 
-      const result = await pool.query(
+      // Save the updated debt.
+      const result = await client.query(
         `UPDATE debts
-       SET customer_id = $1,
-           amount = $2,
-           description = $3,
-           debt_date = $4,
-           due_date = $5
-       WHERE debt_id = $6
-       RETURNING *`,
+         SET customer_id = $1,
+             amount = $2,
+             description = $3,
+             debt_date = $4,
+             due_date = $5
+         WHERE debt_id = $6
+         RETURNING *`,
         [
           customerId,
           debtAmount,
@@ -1361,19 +1361,44 @@ app.put(
         ],
       );
 
-      if (result.rowCount === 0) {
-        return res.status(404).json({
-          success: false,
-          message: "Debt record not found.",
-        });
-      }
+      const updatedDebt = result.rows[0];
 
-      res.status(200).json({
+      // Record the old and new debt values in the same transaction.
+      await writeAuditLog(client, {
+        actorUserId: req.user.userId,
+        customerId: updatedDebt.customer_id,
+        debtId: id,
+        action: "DEBT_UPDATED",
+        entityType: "debt",
+        entityId: id,
+        oldValues: {
+          customer_id: existingDebt.customer_id,
+          amount: Number(existingDebt.amount),
+          description: existingDebt.description,
+          debt_date: existingDebt.debt_date,
+          due_date: existingDebt.due_date,
+        },
+        newValues: {
+          customer_id: updatedDebt.customer_id,
+          amount: Number(updatedDebt.amount),
+          description: updatedDebt.description,
+          debt_date: updatedDebt.debt_date,
+          due_date: updatedDebt.due_date,
+        },
+      });
+
+      await client.query("COMMIT");
+
+      return res.status(200).json({
         success: true,
         message: "Debt updated successfully.",
-        data: result.rows[0],
+        data: updatedDebt,
       });
     } catch (error) {
+      if (client) {
+        await client.query("ROLLBACK").catch(() => {});
+      }
+
       console.error("Error updating debt:", error.message);
 
       if (error.code === "23503") {
@@ -1383,10 +1408,12 @@ app.put(
         });
       }
 
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         message: "Failed to update debt record.",
       });
+    } finally {
+      client?.release();
     }
   },
 );
