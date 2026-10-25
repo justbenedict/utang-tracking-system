@@ -1249,15 +1249,27 @@ app.put(
       }
 
       // Check that the debt exists and calculate payments already made
+
       const debtResult = await pool.query(
         `SELECT
-         debts.debt_id,
-         COALESCE(SUM(payments.amount), 0) AS total_paid
-       FROM debts
-       LEFT JOIN payments
-         ON payments.debt_id = debts.debt_id
-       WHERE debts.debt_id = $1
-       GROUP BY debts.debt_id`,
+     debts.debt_id,
+     debts.customer_id,
+     debts.amount,
+     debts.description,
+     debts.debt_date,
+     debts.due_date,
+     COALESCE(SUM(payments.amount), 0) AS total_paid
+   FROM debts
+   LEFT JOIN payments
+     ON payments.debt_id = debts.debt_id
+   WHERE debts.debt_id = $1
+   GROUP BY
+     debts.debt_id,
+     debts.customer_id,
+     debts.amount,
+     debts.description,
+     debts.debt_date,
+     debts.due_date`,
         [id],
       );
 
@@ -1304,6 +1316,21 @@ app.put(
             message: "You are not assigned to the selected customer.",
           });
         }
+      }
+
+      const existingDebt = debtResult.rows[0];
+
+      // Staff cannot change the original principal amount.
+      if (
+        req.user.role === "staff" &&
+        Math.round(Number(amount) * 100) !==
+          Math.round(Number(existingDebt.amount) * 100)
+      ) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "Staff cannot change the original debt amount. Please request Admin approval.",
+        });
       }
 
       const totalPaid = Number(debtResult.rows[0].total_paid);
@@ -1368,7 +1395,7 @@ app.put(
 app.delete(
   "/api/debts/:id",
   authenticateToken,
-  authorizeRoles("admin", "staff"),
+  authorizeRoles("admin"),
   async (req, res) => {
     const id = Number(req.params.id);
     let client;
@@ -1401,26 +1428,6 @@ app.delete(
           success: false,
           message: "Debt record not found.",
         });
-      }
-
-      // Staff can delete debts only for assigned customers.
-      if (req.user.role === "staff") {
-        const assignmentResult = await client.query(
-          `SELECT 1
-           FROM staff_assignments
-           WHERE staff_user_id = $1
-             AND customer_id = $2`,
-          [req.user.userId, debtResult.rows[0].customer_id],
-        );
-
-        if (assignmentResult.rowCount === 0) {
-          await client.query("ROLLBACK");
-
-          return res.status(403).json({
-            success: false,
-            message: "You are not assigned to this debt's customer.",
-          });
-        }
       }
 
       // Protect debts that have recorded payments.
