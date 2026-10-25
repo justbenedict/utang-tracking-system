@@ -634,7 +634,7 @@ tbody tr:last-child td {
   select,
   .report-actions,
   .panel .field {
-  display: none !important;
+    display: none !important;
   }
 }
 .report-actions {
@@ -642,4 +642,86 @@ tbody tr:last-child td {
   flex-wrap: wrap;
   gap: 12px;
   align-items: center;
+}
+
+/* Login Page */
+.login-container {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 24px;
+  background: #f5f7f6;
+}
+
+.login-form {
+  width: 100%;
+  max-width: 400px;
+  padding: 32px;
+  background: #ffffff;
+  border: 1px solid #e6ece8;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(23, 59, 50, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.login-form h1 {
+  margin: 0;
+  text-align: center;
+  font-size: 28px;
+  color: #173b32;
+}
+
+.login-form p {
+  margin: 0 0 12px;
+  text-align: center;
+  color: #7a8e84;
+}
+
+.login-form label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #374a40;
+}
+
+.login-form input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px;
+  border: 1px solid #dfe7e1;
+  border-radius: 8px;
+  font-size: 15px;
+  outline: none;
+  background: #fff;
+  color: #293d32;
+}
+
+.login-form input:focus {
+  border-color: #57916b;
+  box-shadow: 0 0 0 3px #e3f2e7;
+}
+
+.login-form button {
+  margin-top: 8px;
+  padding: 12px;
+  border: none;
+  border-radius: 8px;
+  background: #245b3d;
+  color: white;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.login-form button:hover {
+  background: #19472e;
+}
+
+.login-form .login-error {
+  margin: 0;
+  color: #b42318;
+  font-size: 14px;
+  text-align: left;
 }

@@ -10,7 +10,11 @@ const money = (amount) =>
 const API_URL = "http://localhost:5000/api";
 
 function App() {
+  const [token, setToken] = useState("");
+  const [user, setUser] = useState(null);
+  const [loginError, setLoginError] = useState("");
   const [page, setPage] = useState("Dashboard");
+
   const [customers, setCustomers] = useState([]);
   const [customersLoading, setCustomersLoading] = useState(true);
   const [editingCustomer, setEditingCustomer] = useState(null);
@@ -25,6 +29,46 @@ function App() {
     reportStartDate && reportEndDate && reportStartDate > reportEndDate;
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoginError("");
+
+    const username = e.target.username.value;
+    const password = e.target.password.value;
+
+    try {
+      const response = await fetch(`${API_URL}/auth/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ username, password }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setLoginError(data.message || "Login failed.");
+        return;
+      }
+
+      setToken(data.token);
+      setUser({
+        userId: data.userId,
+        username: data.username,
+        role: data.role,
+        customerId: data.customerId,
+      });
+
+      setPage("Dashboard");
+    } catch (error) {
+      setLoginError(
+        "Cannot connect to the server. Make sure the backend is running.",
+      );
+    }
+  };
+
   const filteredReportDebts = debts.filter((debt) => {
     if (reportStartDate && debt.date < reportStartDate) return false;
     if (reportEndDate && debt.date > reportEndDate) return false;
@@ -104,7 +148,11 @@ function App() {
   // Load customers from the PostgreSQL database through Express.
   async function loadCustomers() {
     try {
-      const response = await fetch(`${API_URL}/customers`);
+      const response = await fetch(`${API_URL}/customers`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
       const result = await response.json();
 
       if (!response.ok || !result.success) {
@@ -129,14 +177,20 @@ function App() {
   }
 
   useEffect(() => {
+    if (!token || !user) return;
+
     loadCustomers();
     loadDebts();
     loadPayments();
-  }, []);
+  }, [token, user]);
 
   async function loadPayments() {
     try {
-      const response = await fetch(`${API_URL}/payments`);
+      const response = await fetch(`${API_URL}/payments`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
       const result = await response.json();
 
       if (!response.ok || !result.success) {
@@ -163,7 +217,11 @@ function App() {
   // Load saved debts from PostgreSQL through Express.
   async function loadDebts() {
     try {
-      const response = await fetch(`${API_URL}/debts`);
+      const response = await fetch(`${API_URL}/debts`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
       const result = await response.json();
 
       if (!response.ok || !result.success) {
@@ -216,6 +274,7 @@ function App() {
           method: isEditing ? "PUT" : "POST",
           headers: {
             "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify(customerData),
         },
@@ -280,6 +339,9 @@ function App() {
     try {
       const response = await fetch(`${API_URL}/customers/${customer.id}`, {
         method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
       });
 
       const result = await response.json();
@@ -334,6 +396,7 @@ function App() {
           method: isEditing ? "PUT" : "POST",
           headers: {
             "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({
             customer_id: customerId,
@@ -385,6 +448,9 @@ function App() {
     try {
       const response = await fetch(`${API_URL}/debts/${debt.id}`, {
         method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
       });
 
       const result = await response.json();
@@ -425,6 +491,9 @@ function App() {
     try {
       const response = await fetch(`${API_URL}/payments/${payment.id}`, {
         method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
       });
 
       const result = await response.json();
@@ -486,6 +555,7 @@ function App() {
           method: isEditing ? "PUT" : "POST",
           headers: {
             "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({
             ...(isEditing ? {} : { debt_id: debtId }),
@@ -576,6 +646,39 @@ function App() {
     { name: "Payments", icon: "₱" },
     { name: "Reports", icon: "▥" },
   ];
+
+  if (!token || !user) {
+    return (
+      <div className="login-container">
+        <form className="login-form" onSubmit={handleLogin}>
+          <h1>UtangTrack</h1>
+          <p>Sign in to your account</p>
+
+          <label htmlFor="username">Username</label>
+          <input
+            id="username"
+            name="username"
+            type="text"
+            placeholder="Enter your username"
+            required
+          />
+
+          <label htmlFor="password">Password</label>
+          <input
+            id="password"
+            name="password"
+            type="password"
+            placeholder="Enter your password"
+            required
+          />
+
+          {loginError && <p className="login-error">{loginError}</p>}
+
+          <button type="submit">Log In</button>
+        </form>
+      </div>
+    );
+  }
 
   return (
     <div className="app-shell">
