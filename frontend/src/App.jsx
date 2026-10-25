@@ -710,10 +710,22 @@ function App() {
         </nav>
 
         <div className="sidebar-footer">
-          <div className="avatar">A</div>
+          <div className="avatar">
+            {(user.username || "U").charAt(0).toUpperCase()}
+          </div>
+
           <div>
-            <strong>Administrator</strong>
-            <span>Local demo account</span>
+            <strong>
+              {user.role === "admin"
+                ? "Administrator"
+                : user.role === "staff"
+                  ? "Staff"
+                  : user.role === "customer"
+                    ? "Customer"
+                    : user.username}
+            </strong>
+
+            <span>@{user.username}</span>
           </div>
         </div>
       </aside>
