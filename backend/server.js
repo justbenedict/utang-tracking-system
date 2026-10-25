@@ -526,7 +526,7 @@ app.get(
 app.post(
   "/api/customers",
   authenticateToken,
-  authorizeRoles("admin"),
+  authorizeRoles("admin", "staff"),
   async (req, res) => {
     try {
       const { first_name, last_name, contact_number, address } = req.body;
@@ -588,24 +588,53 @@ app.post(
         });
       }
 
-      const result = await pool.query(
-        `INSERT INTO customers
-        (first_name, last_name, contact_number, address)
-       VALUES ($1, $2, $3, $4)
-       RETURNING *`,
-        [
-          first_name.trim(),
-          last_name.trim(),
-          contact_number?.trim() || null,
-          address?.trim() || null,
-        ],
-      );
+      let client;
 
-      res.status(201).json({
-        success: true,
-        message: "Customer registered successfully.",
-        data: result.rows[0],
-      });
+      try {
+        client = await pool.connect();
+        await client.query("BEGIN");
+
+        const result = await client.query(
+          `INSERT INTO customers
+      (first_name, last_name, contact_number, address)
+     VALUES ($1, $2, $3, $4)
+     RETURNING *`,
+          [
+            first_name.trim(),
+            last_name.trim(),
+            contact_number?.trim() || null,
+            address?.trim() || null,
+          ],
+        );
+
+        const newCustomer = result.rows[0];
+
+        // Automatically assign new customers created by Staff.
+        if (req.user.role === "staff") {
+          await client.query(
+            `INSERT INTO staff_assignments (staff_user_id, customer_id)
+       VALUES ($1, $2)
+       ON CONFLICT (staff_user_id, customer_id) DO NOTHING`,
+            [req.user.userId, newCustomer.customer_id],
+          );
+        }
+
+        await client.query("COMMIT");
+
+        return res.status(201).json({
+          success: true,
+          message: "Customer registered successfully.",
+          data: newCustomer,
+        });
+      } catch (error) {
+        if (client) {
+          await client.query("ROLLBACK").catch(() => {});
+        }
+
+        throw error;
+      } finally {
+        client?.release();
+      }
     } catch (error) {
       console.error("Error registering customer:", error.message);
       res.status(500).json({
@@ -620,7 +649,7 @@ app.post(
 app.put(
   "/api/customers/:id",
   authenticateToken,
-  authorizeRoles("admin"),
+  authorizeRoles("admin", "staff"),
   async (req, res) => {
     try {
       const id = Number(req.params.id);
@@ -633,6 +662,24 @@ app.put(
         });
       }
 
+      // Staff may update only their assigned customers.
+      if (req.user.role === "staff") {
+        const assignment = await pool.query(
+          `SELECT 1
+     FROM staff_assignments
+     WHERE staff_user_id = $1
+       AND customer_id = $2`,
+          [req.user.userId, id],
+        );
+
+        if (assignment.rowCount === 0) {
+          return res.status(403).json({
+            success: false,
+            message: "You can only update customers assigned to you.",
+          });
+        }
+      }
+
       if (
         typeof first_name !== "string" ||
         !first_name.trim() ||
@@ -642,6 +689,14 @@ app.put(
         return res.status(400).json({
           success: false,
           message: "First name and last name are required.",
+        });
+      }
+
+      if (!isValidName(first_name) || !isValidName(last_name)) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Names may contain letters, spaces, apostrophes, and hyphens only.",
         });
       }
 
@@ -657,6 +712,28 @@ app.put(
         return res.status(400).json({
           success: false,
           message: "Address must be text.",
+        });
+      }
+
+      if (
+        contact_number != null &&
+        contact_number.trim() !== "" &&
+        !isValidContactNumber(contact_number.trim())
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Contact number must contain digits only.",
+        });
+      }
+
+      if (
+        address != null &&
+        address.trim() !== "" &&
+        !isValidAddress(address.trim())
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Address contains unsupported characters.",
         });
       }
 
