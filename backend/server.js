@@ -959,75 +959,38 @@ app.post(
   },
 );
 
-// GET API: Retrieve debt records from PostgreSQL
+/* GET: Retrieve debt records */
+
 app.get(
   "/api/debts",
   authenticateToken,
   authorizeRoles("admin", "staff"),
   async (req, res) => {
     try {
-      let result;
-
-      if (req.user.role === "admin") {
-        result = await pool.query(`
-    SELECT
-      debts.debt_id,
-      debts.customer_id,
-      customers.first_name,
-      customers.last_name,
-      debts.amount,
-      debts.description,
-      TO_CHAR(debts.debt_date, 'YYYY-MM-DD') AS debt_date,
-      TO_CHAR(debts.due_date, 'YYYY-MM-DD') AS due_date,
-      debts.status,
-      COALESCE(
-        (
-          SELECT SUM(payments.amount)
-          FROM payments
-          WHERE payments.debt_id = debts.debt_id
-        ),
-        0
-      ) AS total_paid
-    FROM debts
-    INNER JOIN customers
-      ON debts.customer_id = customers.customer_id
-    ORDER BY debts.debt_id DESC
-  `);
-      } else {
-        result = await pool.query(
-          `
-    SELECT
-      debts.debt_id,
-      debts.customer_id,
-      customers.first_name,
-      customers.last_name,
-      debts.amount,
-      debts.description,
-      TO_CHAR(debts.debt_date, 'YYYY-MM-DD') AS debt_date,
-      TO_CHAR(debts.due_date, 'YYYY-MM-DD') AS due_date,
-      debts.status,
-      COALESCE(
-        (
-          SELECT SUM(payments.amount)
-          FROM payments
-          WHERE payments.debt_id = debts.debt_id
-        ),
-        0
-      ) AS total_paid
-    FROM debts
-    INNER JOIN customers
-      ON debts.customer_id = customers.customer_id
-    WHERE EXISTS (
-      SELECT 1
-      FROM staff_assignments AS sa
-      WHERE sa.customer_id = debts.customer_id
-        AND sa.staff_user_id = $1
-    )
-    ORDER BY debts.debt_id DESC
-  `,
-          [req.user.userId],
-        );
-      }
+      const result = await pool.query(`
+        SELECT
+          debts.debt_id,
+          debts.customer_id,
+          customers.first_name,
+          customers.last_name,
+          debts.amount,
+          debts.description,
+          TO_CHAR(debts.debt_date, 'YYYY-MM-DD') AS debt_date,
+          TO_CHAR(debts.due_date, 'YYYY-MM-DD') AS due_date,
+          debts.status,
+          COALESCE(
+            (
+              SELECT SUM(payments.amount)
+              FROM payments
+              WHERE payments.debt_id = debts.debt_id
+            ),
+            0
+          ) AS total_paid
+        FROM debts
+        INNER JOIN customers
+          ON debts.customer_id = customers.customer_id
+        ORDER BY debts.debt_id DESC
+      `);
 
       res.status(200).json({
         success: true,
@@ -1512,7 +1475,7 @@ app.delete(
 
 /* PAYMENT HISTORY */
 
-// GET: Retrieve payment records from PostgreSQL
+/* GET: Retrieve payment records */
 
 app.get(
   "/api/payments",
@@ -1520,60 +1483,25 @@ app.get(
   authorizeRoles("admin", "staff"),
   async (req, res) => {
     try {
-      let result;
-
-      if (req.user.role === "admin") {
-        // Admin can view all payment records.
-        result = await pool.query(`
-          SELECT
-            payments.payment_id,
-            payments.debt_id,
-            payments.amount,
-            TO_CHAR(payments.payment_date, 'YYYY-MM-DD') AS payment_date,
-            payments.notes,
-            payments.created_at,
-            debts.description,
-            debts.customer_id,
-            customers.first_name,
-            customers.last_name
-          FROM payments
-          INNER JOIN debts
-            ON payments.debt_id = debts.debt_id
-          INNER JOIN customers
-            ON debts.customer_id = customers.customer_id
-          ORDER BY payments.payment_id DESC
-        `);
-      } else {
-        // Staff can view payments only for assigned customers.
-        result = await pool.query(
-          `
-            SELECT
-              payments.payment_id,
-              payments.debt_id,
-              payments.amount,
-              TO_CHAR(payments.payment_date, 'YYYY-MM-DD') AS payment_date,
-              payments.notes,
-              payments.created_at,
-              debts.description,
-              debts.customer_id,
-              customers.first_name,
-              customers.last_name
-            FROM payments
-            INNER JOIN debts
-              ON payments.debt_id = debts.debt_id
-            INNER JOIN customers
-              ON debts.customer_id = customers.customer_id
-            WHERE EXISTS (
-              SELECT 1
-              FROM staff_assignments AS sa
-              WHERE sa.customer_id = debts.customer_id
-                AND sa.staff_user_id = $1
-            )
-            ORDER BY payments.payment_id DESC
-          `,
-          [req.user.userId],
-        );
-      }
+      const result = await pool.query(`
+        SELECT
+          payments.payment_id,
+          payments.debt_id,
+          payments.amount,
+          TO_CHAR(payments.payment_date, 'YYYY-MM-DD') AS payment_date,
+          payments.notes,
+          payments.created_at,
+          debts.description,
+          debts.customer_id,
+          customers.first_name,
+          customers.last_name
+        FROM payments
+        INNER JOIN debts
+          ON payments.debt_id = debts.debt_id
+        INNER JOIN customers
+          ON debts.customer_id = customers.customer_id
+        ORDER BY payments.payment_id DESC
+      `);
 
       res.status(200).json({
         success: true,
@@ -1666,26 +1594,6 @@ app.post(
           success: false,
           message: "Debt not found.",
         });
-      }
-
-      // Staff can record payments only for assigned customers.
-      if (req.user.role === "staff") {
-        const assignmentResult = await client.query(
-          `SELECT 1
-           FROM staff_assignments
-           WHERE staff_user_id = $1
-             AND customer_id = $2`,
-          [req.user.userId, debtResult.rows[0].customer_id],
-        );
-
-        if (assignmentResult.rowCount === 0) {
-          await client.query("ROLLBACK");
-
-          return res.status(403).json({
-            success: false,
-            message: "You are not assigned to this debt's customer.",
-          });
-        }
       }
 
       const debt = debtResult.rows[0];

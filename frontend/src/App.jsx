@@ -55,10 +55,10 @@ function App() {
 
       setToken(data.token);
       setUser({
-        userId: data.userId,
-        username: data.username,
-        role: data.role,
-        customerId: data.customerId,
+        userId: data.user.userId,
+        username: data.user.username,
+        role: data.user.role,
+        customerId: data.user.customerId,
       });
 
       setPage("Dashboard");
@@ -1056,6 +1056,7 @@ function App() {
                 title="Payment management"
                 subtitle="Record repayments and review the payment history."
               />
+
               <section className="stats-grid payment-stats">
                 <StatCard
                   label="Total Collected"
@@ -1073,73 +1074,84 @@ function App() {
                   icon="◷"
                 />
               </section>
-              <section className="panel form-panel">
-                <h2>{editingPayment ? "Edit payment" : "Record a payment"}</h2>
-                <form
-                  key={editingPayment?.id ?? "new"}
-                  className="form-grid"
-                  onSubmit={addPayment}
-                >
-                  {!editingPayment && (
-                    <label className="field">
-                      <span>Debt record *</span>
-                      <select name="debtId" required defaultValue="">
-                        <option value="" disabled>
-                          Select a debt
-                        </option>
-                        {debts
-                          .filter((debt) => debt.paid < debt.amount)
-                          .map((debt) => (
-                            <option key={debt.id} value={debt.id}>
-                              {debt.customer} — {money(debt.amount - debt.paid)}{" "}
-                              remaining
-                            </option>
-                          ))}
-                      </select>
-                    </label>
-                  )}
-                  <Field
-                    label="Payment amount (₱)"
-                    name="amount"
-                    type="number"
-                    min="0.01"
-                    step="0.01"
-                    required
-                    placeholder="0.00"
-                    defaultValue={editingPayment?.amount ?? ""}
-                  />
 
-                  <Field
-                    label="Payment date"
-                    name="date"
-                    type="date"
-                    required
-                    defaultValue={
-                      editingPayment?.date ||
-                      new Date().toLocaleDateString("en-CA")
-                    }
-                  />
+              {(user.role === "admin" || user.role === "staff") && (
+                <section className="panel form-panel">
+                  <h2>
+                    {editingPayment ? "Edit payment" : "Record a payment"}
+                  </h2>
+                  <form
+                    key={editingPayment?.id ?? "new"}
+                    className="form-grid"
+                    onSubmit={addPayment}
+                  >
+                    {!editingPayment && (
+                      <label className="field">
+                        <span>Debt record *</span>
+                        <select name="debtId" required defaultValue="">
+                          <option value="" disabled>
+                            Select a debt
+                          </option>
+                          {debts
+                            .filter((debt) => debt.paid < debt.amount)
+                            .map((debt) => (
+                              <option key={debt.id} value={debt.id}>
+                                {debt.customer} —{" "}
+                                {money(debt.amount - debt.paid)} remaining
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+                    )}
 
-                  <Field
-                    label="Notes (optional)"
-                    name="notes"
-                    placeholder="e.g. Partial payment for school expenses"
-                    defaultValue={editingPayment?.notes ?? ""}
-                  />
-                  <button className="primary-button form-submit" type="submit">
-                    {editingPayment ? "Save changes" : "✓ Record payment"}
-                  </button>
-                  {editingPayment && (
+                    <Field
+                      label="Payment amount (₱)"
+                      name="amount"
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      required
+                      placeholder="0.00"
+                      defaultValue={editingPayment?.amount ?? ""}
+                    />
+
+                    <Field
+                      label="Payment date"
+                      name="date"
+                      type="date"
+                      required
+                      defaultValue={
+                        editingPayment?.date ||
+                        new Date().toLocaleDateString("en-CA")
+                      }
+                    />
+
+                    <Field
+                      label="Notes (optional)"
+                      name="notes"
+                      placeholder="e.g. Partial payment for school expenses"
+                      defaultValue={editingPayment?.notes ?? ""}
+                    />
+
                     <button
-                      className="secondary-button form-submit"
-                      type="button"
-                      onClick={() => setEditingPayment(null)}
+                      className="primary-button form-submit"
+                      type="submit"
                     >
-                      Cancel editing
+                      {editingPayment ? "Save changes" : "✓ Record payment"}
                     </button>
-                  )}
-                </form>
-              </section>
+
+                    {editingPayment && (
+                      <button
+                        className="secondary-button form-submit"
+                        type="button"
+                        onClick={() => setEditingPayment(null)}
+                      >
+                        Cancel editing
+                      </button>
+                    )}
+                  </form>
+                </section>
+              )}
 
               <section className="panel">
                 <PanelSearch
@@ -1175,20 +1187,28 @@ function App() {
                           <td>{payment.notes || "—"}</td>
 
                           <td>
-                            <button
-                              className="secondary-button"
-                              type="button"
-                              onClick={() => startEditingPayment(payment)}
-                            >
-                              Edit
-                            </button>{" "}
-                            <button
-                              className="secondary-button"
-                              type="button"
-                              onClick={() => deletePayment(payment)}
-                            >
-                              Delete
-                            </button>
+                            {user.role === "admin" && (
+                              <>
+                                <button
+                                  className="secondary-button"
+                                  type="button"
+                                  onClick={() => startEditingPayment(payment)}
+                                >
+                                  Edit
+                                </button>{" "}
+                                <button
+                                  className="secondary-button"
+                                  type="button"
+                                  onClick={() => deletePayment(payment)}
+                                >
+                                  Delete
+                                </button>
+                              </>
+                            )}
+
+                            {user.role === "staff" && <span>View only</span>}
+
+                            {user.role === "customer" && <span>View only</span>}
                           </td>
                         </tr>
                       ))}
