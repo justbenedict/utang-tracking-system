@@ -38,6 +38,14 @@ function App() {
     reportStartDate && reportEndDate && reportStartDate > reportEndDate;
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
+  const [managedUsers, setManagedUsers] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [newUserRole, setNewUserRole] = useState("staff");
+
+  const [staffAssignments, setStaffAssignments] = useState([]);
+  const [assignmentsLoading, setAssignmentsLoading] = useState(false);
+
+  const [userManagementLoading, setUserManagementLoading] = useState(false);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -98,6 +106,11 @@ function App() {
     setEditingPayment(null);
     setLoginError("");
     setMessage("");
+    setManagedUsers([]);
+    setStaffAssignments([]);
+    setUsersLoading(false);
+    setAssignmentsLoading(false);
+    setUserManagementLoading(false);
   };
 
   const filteredReportDebts = debts.filter((debt) => {
@@ -207,6 +220,199 @@ function App() {
     }
   }
 
+  async function loadManagedUsers() {
+    setUsersLoading(true);
+
+    try {
+      const response = await fetch(`${API_URL}/admin/users`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Failed to load user accounts.");
+      }
+
+      setManagedUsers(result.data);
+    } catch (error) {
+      notify(`Could not load user accounts: ${error.message}`);
+    } finally {
+      setUsersLoading(false);
+    }
+  }
+
+  async function loadStaffAssignments() {
+    setAssignmentsLoading(true);
+
+    try {
+      const response = await fetch(`${API_URL}/admin/staff-assignments`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Failed to load staff assignments.");
+      }
+
+      setStaffAssignments(result.data);
+    } catch (error) {
+      notify(`Could not load staff assignments: ${error.message}`);
+    } finally {
+      setAssignmentsLoading(false);
+    }
+  }
+
+  async function createUser(event) {
+    event.preventDefault();
+
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+
+    const username = formData.get("username").trim();
+    const password = formData.get("password");
+    const role = formData.get("role");
+    const customerId = formData.get("customerId");
+
+    if (username.length < 3 || username.length > 50) {
+      notify("Username must be between 3 and 50 characters.");
+      return;
+    }
+
+    if (password.length < 12) {
+      notify("Password must be at least 12 characters long.");
+      return;
+    }
+
+    if (role === "customer" && !customerId) {
+      notify("Please select a customer for this account.");
+      return;
+    }
+
+    const newUser = {
+      username,
+      password,
+      role,
+    };
+
+    if (role === "customer") {
+      newUser.customerId = Number(customerId);
+    }
+
+    setUserManagementLoading(true);
+
+    try {
+      const response = await fetch(`${API_URL}/admin/users`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(newUser),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Failed to create account.");
+      }
+
+      await loadManagedUsers();
+      form.reset();
+      setNewUserRole("staff");
+      notify("User account created successfully.");
+    } catch (error) {
+      notify(error.message || "Failed to create account.");
+    } finally {
+      setUserManagementLoading(false);
+    }
+  }
+
+  async function toggleUserStatus(account) {
+    const nextStatus = !account.is_active;
+    const action = nextStatus ? "activate" : "deactivate";
+
+    if (
+      !window.confirm(`Are you sure you want to ${action} ${account.username}?`)
+    ) {
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `${API_URL}/admin/users/${account.user_id}/status`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ isActive: nextStatus }),
+        },
+      );
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || `Failed to ${action} account.`);
+      }
+
+      await loadManagedUsers();
+      notify(
+        `Account ${nextStatus ? "activated" : "deactivated"} successfully.`,
+      );
+    } catch (error) {
+      notify(error.message || `Failed to ${action} account.`);
+    }
+  }
+
+  async function assignStaff(event) {
+    event.preventDefault();
+
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+
+    const staffUserId = Number(formData.get("staffUserId"));
+    const customerId = Number(formData.get("customerId"));
+
+    if (!staffUserId || !customerId) {
+      notify("Please select both a staff account and a customer.");
+      return;
+    }
+
+    setUserManagementLoading(true);
+
+    try {
+      const response = await fetch(`${API_URL}/admin/staff-assignments`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ staffUserId, customerId }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Failed to assign customer.");
+      }
+
+      await loadStaffAssignments();
+      form.reset();
+      notify("Staff assignment saved successfully.");
+    } catch (error) {
+      notify(error.message || "Failed to assign customer.");
+    } finally {
+      setUserManagementLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (!token || !user) return;
 
@@ -217,6 +423,11 @@ function App() {
       loadCustomers();
       loadDebts();
       loadPayments();
+    }
+
+    if (user.role === "admin") {
+      loadManagedUsers();
+      loadStaffAssignments();
     }
   }, [token, user]);
 
@@ -714,13 +925,22 @@ function App() {
           { name: "Debt Records", icon: "▤" },
           { name: "Payments", icon: "₱" },
         ]
-      : [
-          { name: "Dashboard", icon: "⌂" },
-          { name: "Customers", icon: "♙" },
-          { name: "Debt Records", icon: "▤" },
-          { name: "Payments", icon: "₱" },
-          { name: "Reports", icon: "▥" },
-        ];
+      : user?.role === "admin"
+        ? [
+            { name: "Dashboard", icon: "⌂" },
+            { name: "Customers", icon: "♙" },
+            { name: "Debt Records", icon: "▤" },
+            { name: "Payments", icon: "₱" },
+            { name: "Reports", icon: "▥" },
+            { name: "User Management", icon: "⚙" },
+          ]
+        : [
+            { name: "Dashboard", icon: "⌂" },
+            { name: "Customers", icon: "♙" },
+            { name: "Debt Records", icon: "▤" },
+            { name: "Payments", icon: "₱" },
+            { name: "Reports", icon: "▥" },
+          ];
 
   if (!token || !user) {
     return (
@@ -1441,9 +1661,8 @@ function App() {
           {page === "Reports" && (
             <div className="page-content">
               <PageIntro
-                eyebrow="UTANG TRACKING SYSTEM"
                 title="Reports"
-                description="Review debt records, collected payments, and outstanding balances."
+                subtitle="Review debt records, collected payments, and outstanding balances."
               />
 
               <div className="panel">
@@ -1611,6 +1830,315 @@ function App() {
                 <DebtTable debts={filteredReportDebts} today={reportAsOfDate} />
               </div>
             </div>
+          )}
+
+          {page === "User Management" && (
+            <>
+              <PageIntro
+                title="User Management"
+                subtitle="Create accounts, manage account access, and assign customers to staff."
+              />
+
+              {/* Create a user account */}
+              <section className="panel form-panel">
+                <h2>Create an account</h2>
+
+                <form className="form-grid" onSubmit={createUser}>
+                  <Field
+                    label="Username"
+                    name="username"
+                    required
+                    minLength={3}
+                    maxLength={50}
+                    placeholder="Enter a username"
+                  />
+
+                  <Field
+                    label="Password"
+                    name="password"
+                    type="password"
+                    required
+                    minLength={12}
+                    placeholder="At least 12 characters"
+                  />
+
+                  <label className="field">
+                    <span>Account role *</span>
+                    <select
+                      name="role"
+                      value={newUserRole}
+                      onChange={(event) => setNewUserRole(event.target.value)}
+                      required
+                    >
+                      <option value="staff">Staff</option>
+                      <option value="customer">Customer</option>
+                    </select>
+                  </label>
+
+                  {newUserRole === "customer" && (
+                    <label className="field">
+                      <span>Link to customer *</span>
+                      <select name="customerId" required defaultValue="">
+                        <option value="" disabled>
+                          Select a customer
+                        </option>
+                        {customers.map((customer) => (
+                          <option key={customer.id} value={customer.id}>
+                            {customer.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+
+                  <button
+                    className="primary-button form-submit"
+                    type="submit"
+                    disabled={userManagementLoading}
+                  >
+                    {userManagementLoading ? "Processing..." : "Create account"}
+                  </button>
+                </form>
+              </section>
+
+              {/* Manage existing accounts */}
+              <section className="panel">
+                <div className="panel-heading">
+                  <div>
+                    <h2>Account list</h2>
+                    <p>
+                      {managedUsers.length} account
+                      {managedUsers.length === 1 ? "" : "s"} registered
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={loadManagedUsers}
+                    disabled={usersLoading}
+                  >
+                    {usersLoading ? "Loading..." : "Refresh"}
+                  </button>
+                </div>
+
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Username</th>
+                        <th>Role</th>
+                        <th>Linked customer</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      {usersLoading ? (
+                        <tr>
+                          <td colSpan={6} className="empty-state">
+                            Loading accounts...
+                          </td>
+                        </tr>
+                      ) : (
+                        <>
+                          {managedUsers.map((account) => {
+                            const linkedCustomer = customers.find(
+                              (customer) =>
+                                Number(customer.id) ===
+                                Number(account.customer_id),
+                            );
+
+                            return (
+                              <tr key={account.user_id}>
+                                <td>
+                                  <strong>{account.username}</strong>
+                                </td>
+
+                                <td>
+                                  {account.role.charAt(0).toUpperCase() +
+                                    account.role.slice(1)}
+                                </td>
+
+                                <td>{linkedCustomer?.name || "—"}</td>
+
+                                <td>
+                                  <span
+                                    className={`status ${
+                                      account.is_active
+                                        ? "status-paid"
+                                        : "status-overdue"
+                                    }`}
+                                  >
+                                    {account.is_active ? "Active" : "Inactive"}
+                                  </span>
+                                </td>
+
+                                <td>
+                                  {account.created_at
+                                    ? new Date(
+                                        account.created_at,
+                                      ).toLocaleDateString()
+                                    : "—"}
+                                </td>
+
+                                <td>
+                                  {account.role === "admin" ? (
+                                    <span>Protected</span>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="secondary-button"
+                                      onClick={() => toggleUserStatus(account)}
+                                    >
+                                      {account.is_active
+                                        ? "Deactivate"
+                                        : "Activate"}
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+
+                          {managedUsers.length === 0 && (
+                            <EmptyRow columns={6} />
+                          )}
+                        </>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              {/* Assign customers to staff */}
+              <section className="panel form-panel">
+                <h2>Assign customers to staff</h2>
+                <p>
+                  Choose an active staff account and a customer it should be
+                  allowed to manage.
+                </p>
+
+                <form className="form-grid" onSubmit={assignStaff}>
+                  <label className="field">
+                    <span>Staff account *</span>
+                    <select name="staffUserId" required defaultValue="">
+                      <option value="" disabled>
+                        Select staff
+                      </option>
+
+                      {managedUsers
+                        .filter(
+                          (account) =>
+                            account.role === "staff" && account.is_active,
+                        )
+                        .map((account) => (
+                          <option key={account.user_id} value={account.user_id}>
+                            {account.username}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+
+                  <label className="field">
+                    <span>Customer *</span>
+                    <select name="customerId" required defaultValue="">
+                      <option value="" disabled>
+                        Select customer
+                      </option>
+
+                      {customers.map((customer) => (
+                        <option key={customer.id} value={customer.id}>
+                          {customer.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <button
+                    type="submit"
+                    className="primary-button form-submit"
+                    disabled={userManagementLoading}
+                  >
+                    Assign customer
+                  </button>
+                </form>
+              </section>
+
+              {/* Existing staff assignments */}
+              <section className="panel">
+                <div className="panel-heading">
+                  <div>
+                    <h2>Current staff assignments</h2>
+                    <p>
+                      {staffAssignments.length} assignment
+                      {staffAssignments.length === 1 ? "" : "s"}
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={loadStaffAssignments}
+                    disabled={assignmentsLoading}
+                  >
+                    {assignmentsLoading ? "Loading..." : "Refresh"}
+                  </button>
+                </div>
+
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Staff username</th>
+                        <th>Assigned customer</th>
+                        <th>Assigned date</th>
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      {assignmentsLoading ? (
+                        <tr>
+                          <td colSpan={3} className="empty-state">
+                            Loading assignments...
+                          </td>
+                        </tr>
+                      ) : (
+                        <>
+                          {staffAssignments.map((assignment) => (
+                            <tr
+                              key={`${assignment.staff_user_id}-${assignment.customer_id}`}
+                            >
+                              <td>
+                                <strong>{assignment.staff_username}</strong>
+                              </td>
+
+                              <td>
+                                {assignment.first_name} {assignment.last_name}
+                              </td>
+
+                              <td>
+                                {assignment.assigned_at
+                                  ? new Date(
+                                      assignment.assigned_at,
+                                    ).toLocaleDateString()
+                                  : "—"}
+                              </td>
+                            </tr>
+                          ))}
+
+                          {staffAssignments.length === 0 && (
+                            <EmptyRow columns={3} />
+                          )}
+                        </>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </>
           )}
 
           <footer className="footer">
