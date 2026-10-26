@@ -10,8 +10,17 @@ const money = (amount) =>
 const API_URL = "http://localhost:5000/api";
 
 function App() {
-  const [token, setToken] = useState("");
-  const [user, setUser] = useState(null);
+  const [token, setToken] = useState(
+    () => localStorage.getItem("utangtrack_token") || "",
+  );
+
+  const [user, setUser] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("utangtrack_user")) || null;
+    } catch {
+      return null;
+    }
+  });
   const [loginError, setLoginError] = useState("");
   const [page, setPage] = useState("Dashboard");
 
@@ -53,20 +62,42 @@ function App() {
         return;
       }
 
-      setToken(data.token);
-      setUser({
+      const loggedInUser = {
         userId: data.user.userId,
         username: data.user.username,
         role: data.user.role,
         customerId: data.user.customerId,
-      });
+      };
 
+      localStorage.setItem("utangtrack_token", data.token);
+      localStorage.setItem("utangtrack_user", JSON.stringify(loggedInUser));
+
+      setToken(data.token);
+      setUser(loggedInUser);
       setPage("Dashboard");
     } catch (error) {
       setLoginError(
         "Cannot connect to the server. Make sure the backend is running.",
       );
     }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("utangtrack_token");
+    localStorage.removeItem("utangtrack_user");
+
+    setToken("");
+    setUser(null);
+    setPage("Dashboard");
+
+    setCustomers([]);
+    setDebts([]);
+    setPayments([]);
+    setEditingCustomer(null);
+    setEditingDebt(null);
+    setEditingPayment(null);
+    setLoginError("");
+    setMessage("");
   };
 
   const filteredReportDebts = debts.filter((debt) => {
@@ -780,9 +811,19 @@ function App() {
             <span className="eyebrow">UTANG TRACKING SYSTEM</span>
             <h1>{page}</h1>
           </div>
-          <div className="demo-badge">
-            <span className="status-dot" />
-            Customer API connected
+          <div className="header-actions">
+            <div className="demo-badge">
+              <span className="status-dot" />
+              API connected
+            </div>
+
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={handleLogout}
+            >
+              Log out
+            </button>
           </div>
         </header>
 
