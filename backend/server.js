@@ -967,7 +967,7 @@ app.get(
   authorizeRoles("admin", "staff"),
   async (req, res) => {
     try {
-      const result = await pool.query(`
+      let query = `
         SELECT
           debts.debt_id,
           debts.customer_id,
@@ -989,8 +989,23 @@ app.get(
         FROM debts
         INNER JOIN customers
           ON debts.customer_id = customers.customer_id
-        ORDER BY debts.debt_id DESC
-      `);
+      `;
+
+      const params = [];
+
+      if (req.user.role === "staff") {
+        query += `
+          INNER JOIN staff_assignments sa
+            ON sa.customer_id = debts.customer_id
+          WHERE sa.staff_user_id = $1
+        `;
+
+        params.push(req.user.userId);
+      }
+
+      query += ` ORDER BY debts.debt_id DESC`;
+
+      const result = await pool.query(query, params);
 
       res.status(200).json({
         success: true,
@@ -1483,7 +1498,7 @@ app.get(
   authorizeRoles("admin", "staff"),
   async (req, res) => {
     try {
-      const result = await pool.query(`
+      let query = `
         SELECT
           payments.payment_id,
           payments.debt_id,
@@ -1500,8 +1515,23 @@ app.get(
           ON payments.debt_id = debts.debt_id
         INNER JOIN customers
           ON debts.customer_id = customers.customer_id
-        ORDER BY payments.payment_id DESC
-      `);
+      `;
+
+      const params = [];
+
+      if (req.user.role === "staff") {
+        query += `
+          INNER JOIN staff_assignments sa
+            ON sa.customer_id = debts.customer_id
+          WHERE sa.staff_user_id = $1
+        `;
+
+        params.push(req.user.userId);
+      }
+
+      query += ` ORDER BY payments.payment_id DESC`;
+
+      const result = await pool.query(query, params);
 
       res.status(200).json({
         success: true,
@@ -1598,10 +1628,30 @@ app.post(
 
       const debt = debtResult.rows[0];
 
+      // Staff may record payments only for assigned customers.
+      if (req.user.role === "staff") {
+        const assignmentResult = await client.query(
+          `SELECT 1
+     FROM staff_assignments
+     WHERE staff_user_id = $1
+       AND customer_id = $2`,
+          [req.user.userId, debt.customer_id],
+        );
+
+        if (assignmentResult.rowCount === 0) {
+          await client.query("ROLLBACK");
+
+          return res.status(403).json({
+            success: false,
+            message: "You are not assigned to this customer.",
+          });
+        }
+      }
+
       const paidResult = await client.query(
         `SELECT COALESCE(SUM(amount), 0) AS total_paid
-       FROM payments
-       WHERE debt_id = $1`,
+   FROM payments
+   WHERE debt_id = $1`,
         [debtId],
       );
 
@@ -1751,10 +1801,15 @@ app.put(
       // Find the payment and identify its debt.
 
       const paymentResult = await client.query(
-        `SELECT payment_id, debt_id
-         FROM payments
-         WHERE payment_id = $1
-         FOR UPDATE`,
+        `SELECT
+     payment_id,
+     debt_id,
+     amount,
+     payment_date,
+     notes
+   FROM payments
+   WHERE payment_id = $1
+   FOR UPDATE`,
         [paymentId],
       );
 
@@ -1793,11 +1848,12 @@ app.put(
 
       // Lock the debt so concurrent payment changes cannot
       // incorrectly exceed its balance.
+
       const debtResult = await client.query(
-        `SELECT debt_id, amount
-       FROM debts
-       WHERE debt_id = $1
-       FOR UPDATE`,
+        `SELECT debt_id, customer_id, amount
+   FROM debts
+   WHERE debt_id = $1
+   FOR UPDATE`,
         [debtId],
       );
 
@@ -1843,6 +1899,29 @@ app.put(
        RETURNING *`,
         [paymentAmount, payment_date, notes?.trim() || null, paymentId],
       );
+
+      const oldPayment = paymentResult.rows[0];
+      const newPayment = updatedPayment.rows[0];
+
+      await writeAuditLog(client, {
+        actorUserId: req.user.userId,
+        customerId: debtResult.rows[0].customer_id,
+        debtId,
+        paymentId,
+        action: "PAYMENT_UPDATED",
+        entityType: "payment",
+        entityId: paymentId,
+        oldValues: {
+          amount: Number(oldPayment.amount),
+          payment_date: oldPayment.payment_date,
+          notes: oldPayment.notes,
+        },
+        newValues: {
+          amount: Number(newPayment.amount),
+          payment_date: newPayment.payment_date,
+          notes: newPayment.notes,
+        },
+      });
 
       // Recalculate the total and debt status.
       const newTotalPaid =

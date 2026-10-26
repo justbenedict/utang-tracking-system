@@ -179,49 +179,83 @@ function App() {
   useEffect(() => {
     if (!token || !user) return;
 
-    loadCustomers();
-    loadDebts();
-    loadPayments();
+    if (user.role === "customer") {
+      loadDebts();
+      loadPayments();
+    } else {
+      loadCustomers();
+      loadDebts();
+      loadPayments();
+    }
   }, [token, user]);
 
+  useEffect(() => {
+    if (
+      user?.role === "customer" &&
+      !["Dashboard", "Debt Records", "Payments"].includes(page)
+    ) {
+      setPage("Dashboard");
+    }
+  }, [user, page]);
+
   async function loadPayments() {
+    if (!token || !user) return;
+
     try {
-      const response = await fetch(`${API_URL}/payments`, {
+      const endpoint =
+        user.role === "customer"
+          ? `${API_URL}/customer/my-payments`
+          : `${API_URL}/payments`;
+
+      const response = await fetch(endpoint, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
       });
+
       const result = await response.json();
 
       if (!response.ok || !result.success) {
-        throw new Error(result.message || "Failed to load payments.");
+        throw new Error(result.message || "Failed to load payment history.");
       }
 
-      setPayments(
-        result.data.map((payment) => ({
-          id: payment.payment_id,
-          debtId: payment.debt_id,
-          customer: `${payment.first_name} ${payment.last_name}`,
-          description: payment.description,
-          amount: Number(payment.amount),
-          date: String(payment.payment_date).slice(0, 10),
-          notes: payment.notes,
-        })),
-      );
+      const formattedPayments = result.data.map((payment) => ({
+        id: payment.payment_id,
+        debtId: payment.debt_id,
+        customer:
+          user.role === "customer"
+            ? user.username
+            : `${payment.first_name} ${payment.last_name}`,
+        description: payment.description,
+        amount: Number(payment.amount),
+        date: String(payment.payment_date).slice(0, 10),
+        notes: payment.notes,
+      }));
+
+      setPayments(formattedPayments);
     } catch (error) {
-      console.error("Error loading payments:", error);
-      notify("Failed to load payment history.");
+      console.error("Failed to load payments:", error);
+      notify(`Failed to load payment history: ${error.message}`);
     }
   }
 
   // Load saved debts from PostgreSQL through Express.
+
   async function loadDebts() {
+    if (!token || !user) return;
+
     try {
-      const response = await fetch(`${API_URL}/debts`, {
+      const endpoint =
+        user.role === "customer"
+          ? `${API_URL}/customer/my-debts`
+          : `${API_URL}/debts`;
+
+      const response = await fetch(endpoint, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
       });
+
       const result = await response.json();
 
       if (!response.ok || !result.success) {
@@ -231,7 +265,10 @@ function App() {
       const formattedDebts = result.data.map((debt) => ({
         id: debt.debt_id,
         customerId: debt.customer_id,
-        customer: `${debt.first_name} ${debt.last_name}`,
+        customer:
+          user.role === "customer"
+            ? user.username
+            : `${debt.first_name} ${debt.last_name}`,
         amount: Number(debt.amount),
         description: debt.description,
         date: debt.debt_date?.slice(0, 10) || "",
@@ -639,13 +676,20 @@ function App() {
     URL.revokeObjectURL(url);
   }
 
-  const navItems = [
-    { name: "Dashboard", icon: "⌂" },
-    { name: "Customers", icon: "♙" },
-    { name: "Debt Records", icon: "▤" },
-    { name: "Payments", icon: "₱" },
-    { name: "Reports", icon: "▥" },
-  ];
+  const navItems =
+    user?.role === "customer"
+      ? [
+          { name: "Dashboard", icon: "⌂" },
+          { name: "Debt Records", icon: "▤" },
+          { name: "Payments", icon: "₱" },
+        ]
+      : [
+          { name: "Dashboard", icon: "⌂" },
+          { name: "Customers", icon: "♙" },
+          { name: "Debt Records", icon: "▤" },
+          { name: "Payments", icon: "₱" },
+          { name: "Reports", icon: "▥" },
+        ];
 
   if (!token || !user) {
     return (
@@ -749,72 +793,146 @@ function App() {
             <>
               <section className="welcome">
                 <div>
-                  <p className="welcome-label">YOUR FINANCIAL OVERVIEW</p>
-                  <h2>Manage debts with confidence.</h2>
+                  <p className="welcome-label">
+                    {user?.role === "customer"
+                      ? "YOUR ACCOUNT OVERVIEW"
+                      : "YOUR FINANCIAL OVERVIEW"}
+                  </p>
+                  <h2>
+                    {user?.role === "customer"
+                      ? `Welcome, ${user.username}.`
+                      : "Manage debts with confidence."}
+                  </h2>
                   <p>
-                    Track customer balances, repayments, and due dates in one
-                    place.
+                    {user?.role === "customer"
+                      ? "Review your outstanding balance and payment history."
+                      : "Track customer balances, repayments, and due dates in one place."}
                   </p>
                 </div>
                 <div className="welcome-symbol">₱</div>
               </section>
 
-              <section className="stats-grid">
-                <StatCard
-                  label="Total Debt"
-                  value={money(debts.reduce((s, d) => s + d.amount, 0))}
-                  icon="▤"
-                />
-                <StatCard
-                  label="Outstanding Balance"
-                  value={money(outstanding)}
-                  icon="◷"
-                />
-                <StatCard
-                  label="Payments Collected"
-                  value={money(collected)}
-                  icon="✓"
-                />
-                <StatCard
-                  label="Unsettled Debts"
-                  value={unpaidCount}
-                  icon="!"
-                />
-                <StatCard label="Overdue Debts" value={overdueCount} icon="!" />
-                <StatCard
-                  label="Overdue Balance"
-                  value={money(overdueBalance)}
-                  icon="◷"
-                />
-              </section>
+              {user?.role === "customer" ? (
+                <>
+                  <section className="stats-grid">
+                    <StatCard
+                      label="My Total Debt"
+                      value={money(debts.reduce((s, d) => s + d.amount, 0))}
+                      icon="▤"
+                    />
+                    <StatCard
+                      label="My Outstanding Balance"
+                      value={money(
+                        debts.reduce(
+                          (s, d) => s + Math.max(0, d.amount - d.paid),
+                          0,
+                        ),
+                      )}
+                      icon="◷"
+                    />
+                    <StatCard
+                      label="My Payments"
+                      value={money(
+                        payments.reduce((s, payment) => s + payment.amount, 0),
+                      )}
+                      icon="✓"
+                    />
+                    <StatCard
+                      label="My Unsettled Debts"
+                      value={debts.filter((d) => d.status !== "Paid").length}
+                      icon="!"
+                    />
+                  </section>
 
-              <section className="panel">
-                <div className="panel-heading">
-                  <div>
-                    <h2>Recent debt records</h2>
-                    <p>Your latest recorded debts</p>
-                  </div>
-                  <button
-                    className="secondary-button"
-                    onClick={() => setPage("Debt Records")}
-                  >
-                    View all →
-                  </button>
-                </div>
-                <DebtTable debts={debts.slice(0, 5)} today={today} />
-              </section>
+                  <section className="panel">
+                    <div className="panel-heading">
+                      <div>
+                        <h2>My recent debts</h2>
+                        <p>Your latest recorded debt entries</p>
+                      </div>
+                      <button
+                        className="secondary-button"
+                        onClick={() => setPage("Debt Records")}
+                      >
+                        View all →
+                      </button>
+                    </div>
+                    <DebtTable debts={debts.slice(0, 5)} today={today} />
+                  </section>
 
-              <section className="quick-actions">
-                <button onClick={() => setPage("Customers")}>
-                  ＋ Register a customer
-                </button>
-                <button onClick={() => setPage("Debt Records")}>
-                  ＋ Add a debt
-                </button>
-                <button onClick={() => setPage("Payments")}>
-                  ＋ Record a payment
-                </button>
-              </section>
+                  <section className="quick-actions">
+                    <button onClick={() => setPage("Debt Records")}>
+                      View my debts
+                    </button>
+                    <button onClick={() => setPage("Payments")}>
+                      View my payments
+                    </button>
+                  </section>
+                </>
+              ) : (
+                <>
+                  <section className="stats-grid">
+                    <StatCard
+                      label="Total Debt"
+                      value={money(debts.reduce((s, d) => s + d.amount, 0))}
+                      icon="▤"
+                    />
+                    <StatCard
+                      label="Outstanding Balance"
+                      value={money(outstanding)}
+                      icon="◷"
+                    />
+                    <StatCard
+                      label="Payments Collected"
+                      value={money(collected)}
+                      icon="✓"
+                    />
+                    <StatCard
+                      label="Unsettled Debts"
+                      value={unpaidCount}
+                      icon="!"
+                    />
+                    <StatCard
+                      label="Overdue Debts"
+                      value={overdueCount}
+                      icon="!"
+                    />
+                    <StatCard
+                      label="Overdue Balance"
+                      value={money(overdueBalance)}
+                      icon="◷"
+                    />
+                  </section>
+
+                  <section className="panel">
+                    <div className="panel-heading">
+                      <div>
+                        <h2>Recent debt records</h2>
+                        <p>Your latest recorded debts</p>
+                      </div>
+                      <button
+                        className="secondary-button"
+                        onClick={() => setPage("Debt Records")}
+                      >
+                        View all →
+                      </button>
+                    </div>
+                    <DebtTable debts={debts.slice(0, 5)} today={today} />
+                  </section>
+
+                  <section className="quick-actions">
+                    <button onClick={() => setPage("Customers")}>
+                      ＋ Register a customer
+                    </button>
+                    <button onClick={() => setPage("Debt Records")}>
+                      ＋ Add a debt
+                    </button>
+                    <button onClick={() => setPage("Payments")}>
+                      ＋ Record a payment
+                    </button>
+                  </section>
+                </>
+              )}
             </>
           )}
 
@@ -960,104 +1078,124 @@ function App() {
           {page === "Debt Records" && (
             <>
               <PageIntro
-                title="Debt records"
-                subtitle="Create and monitor debts linked to registered customers."
+                title={
+                  user?.role === "customer" ? "My debt records" : "Debt records"
+                }
+                subtitle={
+                  user?.role === "customer"
+                    ? "Review your recorded debts, outstanding balances, and due dates."
+                    : "Create and monitor debts linked to registered customers."
+                }
               />
 
-              <section className="panel form-panel">
-                <h2>
-                  {editingDebt ? "Edit debt record" : "Add a debt record"}
-                </h2>
+              {user?.role !== "customer" && (
+                <section className="panel form-panel">
+                  <h2>
+                    {editingDebt ? "Edit debt record" : "Add a debt record"}
+                  </h2>
 
-                <form
-                  key={editingDebt?.id ?? "new"}
-                  className="form-grid"
-                  onSubmit={addDebt}
-                >
-                  <label className="field">
-                    <span>Customer *</span>
-                    <select
-                      name="customerId"
-                      required
-                      defaultValue={editingDebt?.customerId ?? ""}
-                    >
-                      <option value="" disabled>
-                        Select a customer
-                      </option>
-                      {customers.map((customer) => (
-                        <option key={customer.id} value={customer.id}>
-                          {customer.name}
+                  <form
+                    key={editingDebt?.id ?? "new"}
+                    className="form-grid"
+                    onSubmit={addDebt}
+                  >
+                    <label className="field">
+                      <span>Customer *</span>
+                      <select
+                        name="customerId"
+                        required
+                        defaultValue={editingDebt?.customerId ?? ""}
+                      >
+                        <option value="" disabled>
+                          Select a customer
                         </option>
-                      ))}
-                    </select>
-                  </label>
+                        {customers.map((customer) => (
+                          <option key={customer.id} value={customer.id}>
+                            {customer.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
 
-                  <Field
-                    label="Amount (₱)"
-                    name="amount"
-                    type="number"
-                    min="0.01"
-                    step="0.01"
-                    required
-                    placeholder="0.00"
-                    defaultValue={editingDebt?.amount ?? ""}
-                  />
+                    <Field
+                      label="Amount (₱)"
+                      name="amount"
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      required
+                      placeholder="0.00"
+                      defaultValue={editingDebt?.amount ?? ""}
+                    />
 
-                  <Field
-                    label="Description"
-                    name="description"
-                    required
-                    placeholder="Reason for the debt"
-                    defaultValue={editingDebt?.description ?? ""}
-                  />
+                    <Field
+                      label="Description"
+                      name="description"
+                      required
+                      placeholder="Reason for the debt"
+                      defaultValue={editingDebt?.description ?? ""}
+                    />
 
-                  <Field
-                    label="Debt date"
-                    name="date"
-                    type="date"
-                    required
-                    defaultValue={
-                      editingDebt?.date ||
-                      new Date().toLocaleDateString("en-CA")
-                    }
-                  />
+                    <Field
+                      label="Debt date"
+                      name="date"
+                      type="date"
+                      required
+                      defaultValue={
+                        editingDebt?.date ||
+                        new Date().toLocaleDateString("en-CA")
+                      }
+                    />
 
-                  <Field
-                    label="Due date"
-                    name="due"
-                    type="date"
-                    defaultValue={editingDebt?.due || ""}
-                  />
+                    <Field
+                      label="Due date"
+                      name="due"
+                      type="date"
+                      defaultValue={editingDebt?.due || ""}
+                    />
 
-                  <button className="primary-button form-submit" type="submit">
-                    {editingDebt ? "Save changes" : "＋ Add debt"}
-                  </button>
-
-                  {editingDebt && (
                     <button
-                      className="secondary-button form-submit"
-                      type="button"
-                      onClick={() => setEditingDebt(null)}
+                      className="primary-button form-submit"
+                      type="submit"
                     >
-                      Cancel editing
+                      {editingDebt ? "Save changes" : "＋ Add debt"}
                     </button>
-                  )}
-                </form>
-              </section>
+
+                    {editingDebt && (
+                      <button
+                        className="secondary-button form-submit"
+                        type="button"
+                        onClick={() => setEditingDebt(null)}
+                      >
+                        Cancel editing
+                      </button>
+                    )}
+                  </form>
+                </section>
+              )}
 
               <section className="panel">
                 <PanelSearch
-                  title="All debt records"
+                  title={
+                    user?.role === "customer"
+                      ? "My debt records"
+                      : "All debt records"
+                  }
                   count={filteredDebts.length}
                   search={search}
                   setSearch={setSearch}
                 />
-                <DebtTable
-                  debts={filteredDebts}
-                  onEdit={startEditingDebt}
-                  onDelete={deleteDebt}
-                  today={today}
-                />
+
+                {user?.role === "customer" ? (
+                  <DebtTable debts={filteredDebts} today={today} />
+                ) : (
+                  <DebtTable
+                    debts={filteredDebts}
+                    onEdit={startEditingDebt}
+                    onDelete={deleteDebt}
+                    today={today}
+                  />
+                )}
               </section>
             </>
           )}
@@ -1065,14 +1203,26 @@ function App() {
           {page === "Payments" && (
             <>
               <PageIntro
-                title="Payment management"
-                subtitle="Record repayments and review the payment history."
+                title={
+                  user.role === "customer"
+                    ? "My payment history"
+                    : "Payment management"
+                }
+                subtitle={
+                  user.role === "customer"
+                    ? "Review the payments recorded for your debts."
+                    : "Record repayments and review the payment history."
+                }
               />
 
               <section className="stats-grid payment-stats">
                 <StatCard
-                  label="Total Collected"
-                  value={money(collected)}
+                  label={
+                    user.role === "customer" ? "My Payments" : "Total Collected"
+                  }
+                  value={money(
+                    payments.reduce((sum, payment) => sum + payment.amount, 0),
+                  )}
                   icon="₱"
                 />
                 <StatCard
@@ -1081,8 +1231,20 @@ function App() {
                   icon="▤"
                 />
                 <StatCard
-                  label="Remaining Balance"
-                  value={money(outstanding)}
+                  label={
+                    user.role === "customer"
+                      ? "My Remaining Balance"
+                      : "Remaining Balance"
+                  }
+                  value={money(
+                    user.role === "customer"
+                      ? debts.reduce(
+                          (sum, debt) =>
+                            sum + Math.max(0, debt.amount - debt.paid),
+                          0,
+                        )
+                      : outstanding,
+                  )}
                   icon="◷"
                 />
               </section>
@@ -1167,7 +1329,11 @@ function App() {
 
               <section className="panel">
                 <PanelSearch
-                  title="Payment history"
+                  title={
+                    user.role === "customer"
+                      ? "My payment history"
+                      : "Payment history"
+                  }
                   count={filteredPayments.length}
                   search={search}
                   setSearch={setSearch}
@@ -1176,7 +1342,9 @@ function App() {
                   <table>
                     <thead>
                       <tr>
-                        <th>Customer</th>
+                        <th>
+                          {user.role === "customer" ? "Account" : "Customer"}
+                        </th>
                         <th>Description</th>
                         <th>Payment date</th>
                         <th>Amount</th>
@@ -1184,7 +1352,6 @@ function App() {
                         <th>Actions</th>
                       </tr>
                     </thead>
-
                     <tbody>
                       {filteredPayments.map((payment) => (
                         <tr key={payment.id}>
@@ -1197,7 +1364,6 @@ function App() {
                             {money(payment.amount)}
                           </td>
                           <td>{payment.notes || "—"}</td>
-
                           <td>
                             {user.role === "admin" && (
                               <>
@@ -1217,14 +1383,10 @@ function App() {
                                 </button>
                               </>
                             )}
-
-                            {user.role === "staff" && <span>View only</span>}
-
-                            {user.role === "customer" && <span>View only</span>}
+                            {user.role !== "admin" && <span>View only</span>}
                           </td>
                         </tr>
                       ))}
-
                       {filteredPayments.length === 0 && (
                         <EmptyRow columns={6} />
                       )}

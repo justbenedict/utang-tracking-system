@@ -1,7 +1,7 @@
 const pool = require("./db");
 const jwt = require("jsonwebtoken");
 
-function authenticateToken(req, res, next) {
+async function authenticateToken(req, res, next) {
   const authHeader = req.headers.authorization;
   const token = authHeader && authHeader.split(" ")[1];
 
@@ -11,33 +11,49 @@ function authenticateToken(req, res, next) {
     });
   }
 
-  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-    if (err) {
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    const result = await pool.query(
+      `SELECT user_id, username, role, customer_id, is_active
+       FROM users
+       WHERE user_id = $1`,
+      [decoded.userId],
+    );
+
+    if (result.rowCount === 0 || !result.rows[0].is_active) {
+      return res.status(403).json({
+        message: "This account is inactive or no longer exists.",
+      });
+    }
+
+    const user = result.rows[0];
+
+    req.user = {
+      userId: user.user_id,
+      username: user.username,
+      role: user.role,
+      customerId: user.customer_id,
+    };
+
+    next();
+  } catch (error) {
+    if (
+      error.name === "JsonWebTokenError" ||
+      error.name === "TokenExpiredError" ||
+      error.name === "NotBeforeError"
+    ) {
       return res.status(403).json({
         message: "Invalid or expired token.",
       });
     }
 
-    pool
-      .query("SELECT is_active FROM users WHERE user_id = $1", [user.userId])
-      .then((result) => {
-        if (result.rowCount === 0 || !result.rows[0].is_active) {
-          return res.status(403).json({
-            message: "This account is inactive or no longer exists.",
-          });
-        }
+    console.error("Authentication check failed:", error.message);
 
-        req.user = user;
-        next();
-      })
-      .catch((error) => {
-        console.error("Authentication check failed:", error.message);
-
-        return res.status(500).json({
-          message: "Failed to verify account status.",
-        });
-      });
-  });
+    return res.status(500).json({
+      message: "Failed to verify account status.",
+    });
+  }
 }
 
 function authorizeRoles(...allowedRoles) {
