@@ -946,7 +946,7 @@ function App() {
     return (
       <div className="login-container">
         <form className="login-form" onSubmit={handleLogin}>
-          <h1>UtangTrack</h1>
+          <h1>Kwenta</h1>
           <p>Sign in to your account</p>
 
           <label htmlFor="username">Username</label>
@@ -981,7 +981,7 @@ function App() {
         <div className="brand">
           <div className="brand-mark">₱</div>
           <div>
-            <h2>UtangTrack</h2>
+            <h2>Kwenta</h2>
             <span>Debt Management System</span>
           </div>
         </div>
@@ -2142,7 +2142,7 @@ function App() {
           )}
 
           <footer className="footer">
-            UtangTrack · Utang Tracking System · React interface
+            Kwenta · Utang Tracking System · React interface
           </footer>
         </div>
       </main>

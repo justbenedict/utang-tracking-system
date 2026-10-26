@@ -125,6 +125,13 @@ app.post("/api/auth/login", async (req, res) => {
       });
     }
 
+    await pool.query(
+      `UPDATE users
+   SET last_login_at = CURRENT_TIMESTAMP
+   WHERE user_id = $1`,
+      [user.user_id],
+    );
+
     const token = jwt.sign(
       {
         userId: user.user_id,
@@ -2107,6 +2114,107 @@ app.delete(
       });
     } finally {
       client?.release();
+    }
+  },
+);
+
+app.get(
+  "/api/admin/ai-insights",
+  authenticateToken,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      const [topPayers, overdueDebts, oldUnpaidDebts, inactiveAccounts] =
+        await Promise.all([
+          pool.query(`
+            SELECT
+              c.customer_id,
+              c.first_name,
+              c.last_name,
+              COALESCE(SUM(p.amount), 0) AS total_paid
+            FROM customers c
+            JOIN debts d ON d.customer_id = c.customer_id
+            JOIN payments p ON p.debt_id = d.debt_id
+            GROUP BY c.customer_id, c.first_name, c.last_name
+            ORDER BY SUM(p.amount) DESC
+            LIMIT 5
+          `),
+
+          pool.query(`
+            SELECT
+              d.debt_id,
+              d.customer_id,
+              c.first_name,
+              c.last_name,
+              d.description,
+              d.amount,
+              d.due_date,
+              COALESCE(SUM(p.amount), 0) AS total_paid,
+              d.amount - COALESCE(SUM(p.amount), 0)
+                AS remaining_balance
+            FROM debts d
+            JOIN customers c ON c.customer_id = d.customer_id
+            LEFT JOIN payments p ON p.debt_id = d.debt_id
+            WHERE d.due_date < CURRENT_DATE
+            GROUP BY
+              d.debt_id, c.customer_id,
+              c.first_name, c.last_name
+            HAVING d.amount - COALESCE(SUM(p.amount), 0) > 0
+            ORDER BY d.due_date ASC
+          `),
+
+          pool.query(`
+            SELECT
+              d.debt_id,
+              d.customer_id,
+              c.first_name,
+              c.last_name,
+              d.description,
+              d.debt_date,
+              d.amount,
+              COALESCE(SUM(p.amount), 0) AS total_paid,
+              d.amount - COALESCE(SUM(p.amount), 0)
+                AS remaining_balance
+            FROM debts d
+            JOIN customers c ON c.customer_id = d.customer_id
+            LEFT JOIN payments p ON p.debt_id = d.debt_id
+            WHERE d.debt_date < CURRENT_DATE - INTERVAL '7 days'
+            GROUP BY
+              d.debt_id, c.customer_id,
+              c.first_name, c.last_name
+            HAVING d.amount - COALESCE(SUM(p.amount), 0) > 0
+            ORDER BY d.debt_date ASC
+          `),
+
+          pool.query(`
+  SELECT
+    user_id,
+    username,
+    role,
+    last_login_at,
+    created_at
+  FROM users
+  WHERE is_active = TRUE
+    AND (
+      last_login_at < CURRENT_TIMESTAMP - INTERVAL '7 days'
+      OR last_login_at IS NULL
+    )
+  ORDER BY last_login_at ASC NULLS FIRST
+`),
+        ]);
+
+      res.json({
+        generatedAt: new Date().toISOString(),
+        topPayers: topPayers.rows,
+        overdueDebts: overdueDebts.rows,
+        unpaidOverSevenDays: oldUnpaidDebts.rows,
+        inactiveAccounts: inactiveAccounts.rows,
+      });
+    } catch (error) {
+      console.error("AI insights error:", error);
+      res.status(500).json({
+        message: "Failed to generate debt insights.",
+      });
     }
   },
 );
