@@ -2219,6 +2219,150 @@ app.get(
   },
 );
 
+/* GET: Generate AI analysis of debt insights using local Ollama */
+app.get(
+  "/api/admin/ai-analysis",
+  authenticateToken,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      // Get the existing database insights from our own backend.
+      const insightsResponse = await fetch(
+        `http://localhost:${PORT}/api/admin/ai-insights`,
+        {
+          headers: {
+            Authorization: req.headers.authorization,
+          },
+        },
+      );
+
+      if (!insightsResponse.ok) {
+        throw new Error("Failed to retrieve the database insights.");
+      }
+
+      const insights = await insightsResponse.json();
+
+      // Send only aggregate statistics to the local AI.
+      // Customer names, account usernames, and transaction details are excluded.
+      const summary = {
+        topPayerCount: insights.topPayers.length,
+        overdueDebtCount: insights.overdueDebts.length,
+        overdueBalanceTotal: insights.overdueDebts.reduce(
+          (sum, debt) => sum + Number(debt.remaining_balance),
+          0,
+        ),
+        oldUnpaidDebtCount: insights.unpaidOverSevenDays.length,
+        oldUnpaidBalanceTotal: insights.unpaidOverSevenDays.reduce(
+          (sum, debt) => sum + Number(debt.remaining_balance),
+          0,
+        ),
+        inactiveAccountCount: insights.inactiveAccounts.length,
+      };
+
+      const prompt = `
+You are a recommendation assistant for a debt tracking application in the Philippines.
+
+Your ONLY task is to suggest practical administrative actions based on the verified statistics below.
+
+Do not write a Situation Analysis section.
+Do not repeat or summarize the statistics.
+Do not output monetary amounts or counts.
+Do not make claims about individual customers or accounts.
+Do not invent reasons, motives, payment histories, penalties, fees, or problems.
+Do not recommend actions unrelated to the supplied statistics.
+Do not recommend collection efforts toward top payers unless their unpaid balances are explicitly established.
+Do not contradict any statistic.
+Do not use Markdown formatting.
+
+Use these exact metric meanings:
+- topPayerCount: Customers who have recorded payments. This does not mean they owe money or owe the most.
+- overdueDebtCount: Debts past their due date that still have a remaining balance.
+- overdueBalanceTotal: Combined remaining balance of overdue debts, in PHP.
+- oldUnpaidDebtCount: Debts dated more than 7 days ago that still have a remaining balance.
+- oldUnpaidBalanceTotal: Combined remaining balance of those debts, in PHP.
+- inactiveAccountCount: Active accounts that have not logged in for more than 7 days or have never logged in.
+Rules for recommendations:
+1. Recommend reviewing overdue debts only if overdueDebtCount is greater than zero.
+2. Recommend reviewing older unpaid debts only if oldUnpaidDebtCount is greater than zero.
+3. Recommend reviewing account activity only if inactiveAccountCount is greater than zero.
+4. Do not recommend action for top payers based on this statistic alone.
+5. If no issues are identified, say that no additional action is indicated by these statistics.
+6. Provide at most three numbered recommendations.
+7. Each recommendation must be one or two short sentences.
+8. Output only the numbered recommendations. Do not add headings or an introduction.
+9. End with this exact sentence:
+   These recommendations are suggestions based only on the available statistics.
+
+VERIFIED STATISTICS:
+${JSON.stringify(summary, null, 2)}
+`;
+
+      // Ask the locally running Ollama model to generate the analysis.
+      const ollamaResponse = await fetch(
+        "http://localhost:11434/api/generate",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "qwen2.5:1.5b",
+            prompt,
+            stream: false,
+          }),
+          signal: AbortSignal.timeout(60000),
+        },
+      );
+
+      if (!ollamaResponse.ok) {
+        throw new Error("Ollama could not generate the analysis.");
+      }
+
+      const aiResult = await ollamaResponse.json();
+
+      const recommendations = [];
+
+      if (summary.overdueDebtCount > 0) {
+        recommendations.push(
+          "1. Review overdue debts and verify their remaining balances before following up.",
+        );
+      }
+
+      if (summary.oldUnpaidDebtCount > 0) {
+        recommendations.push(
+          `${recommendations.length + 1}. Review debts that have remained unpaid for more than seven days and verify their current balances.`,
+        );
+      }
+
+      if (summary.inactiveAccountCount > 0) {
+        recommendations.push(
+          `${recommendations.length + 1}. Review inactive account activity and determine whether any follow-up is needed.`,
+        );
+      }
+
+      const safeAnalysis =
+        recommendations.length > 0
+          ? recommendations.join("\n\n")
+          : "No additional action is indicated by the available statistics.";
+
+      return res.status(200).json({
+        success: true,
+        generatedAt: new Date().toISOString(),
+        analysis: safeAnalysis,
+        statistics: summary,
+      });
+    } catch (error) {
+      console.error("Ollama AI analysis error:", error.message);
+
+      return res.status(502).json({
+        success: false,
+        message:
+          "AI analysis is unavailable. Check that Ollama is running and try again.",
+      });
+    }
+  },
+);
+
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);

@@ -47,6 +47,21 @@ function App() {
 
   const [userManagementLoading, setUserManagementLoading] = useState(false);
 
+  const [aiInsights, setAiInsights] = useState({
+    topPayers: [],
+    overdueDebts: [],
+    unpaidOverSevenDays: [],
+    inactiveAccounts: [],
+  });
+
+  const [aiInsightsLoading, setAiInsightsLoading] = useState(false);
+  const [aiInsightsError, setAiInsightsError] = useState("");
+
+  const [aiAnalysis, setAiAnalysis] = useState("");
+  const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false);
+  const [aiAnalysisError, setAiAnalysisError] = useState("");
+  const [aiAnalysisStatistics, setAiAnalysisStatistics] = useState(null);
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoginError("");
@@ -268,6 +283,63 @@ function App() {
     }
   }
 
+  async function loadAIInsights() {
+    if (!token || user?.role !== "admin") return;
+
+    setAiInsightsLoading(true);
+    setAiInsightsError("");
+
+    try {
+      const response = await fetch(`${API_URL}/admin/ai-insights`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.message || "Failed to load AI insights.");
+      }
+
+      setAiInsights(result);
+    } catch (error) {
+      console.error("Failed to load AI insights:", error);
+      setAiInsightsError(error.message || "Failed to load AI insights.");
+    } finally {
+      setAiInsightsLoading(false);
+    }
+  }
+
+  async function loadAIAnalysis() {
+    if (!token || user?.role !== "admin") return;
+
+    setAiAnalysisLoading(true);
+    setAiAnalysisError("");
+
+    try {
+      const response = await fetch(`${API_URL}/admin/ai-analysis`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Failed to generate AI analysis.");
+      }
+
+      setAiAnalysis(result.analysis || "No analysis was returned.");
+      setAiAnalysisStatistics(result.statistics || null);
+    } catch (error) {
+      console.error("Failed to generate AI analysis:", error);
+      setAiAnalysisError(error.message || "Failed to generate AI analysis.");
+    } finally {
+      setAiAnalysisLoading(false);
+    }
+  }
+
   async function createUser(event) {
     event.preventDefault();
 
@@ -428,6 +500,7 @@ function App() {
     if (user.role === "admin") {
       loadManagedUsers();
       loadStaffAssignments();
+      loadAIInsights();
     }
   }, [token, user]);
 
@@ -1164,6 +1237,157 @@ function App() {
                       icon="◷"
                     />
                   </section>
+
+                  {user?.role === "admin" && (
+                    <>
+                      <section className="panel">
+                        <div className="panel-heading">
+                          <div>
+                            <h2>AI Insights</h2>
+                            <p>
+                              Payment activity, overdue debts, and account
+                              activity.
+                            </p>
+                          </div>
+
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            onClick={loadAIInsights}
+                            disabled={aiInsightsLoading}
+                          >
+                            {aiInsightsLoading
+                              ? "Loading..."
+                              : "Refresh insights"}
+                          </button>
+                        </div>
+
+                        {aiInsightsError && (
+                          <p className="form-error">{aiInsightsError}</p>
+                        )}
+
+                        {aiInsightsLoading ? (
+                          <p className="empty-state">Loading insights...</p>
+                        ) : (
+                          <section className="stats-grid">
+                            <StatCard
+                              label="Top Payers"
+                              value={aiInsights.topPayers.length}
+                              detail="Customers with recorded payments"
+                              icon="✓"
+                            />
+
+                            <StatCard
+                              label="Overdue Debts"
+                              value={aiInsights.overdueDebts.length}
+                              detail="Past due with an unpaid balance"
+                              icon="!"
+                            />
+
+                            <StatCard
+                              label="Unpaid for 7+ Days"
+                              value={aiInsights.unpaidOverSevenDays.length}
+                              detail="Debts still carrying a balance"
+                              icon="◷"
+                            />
+
+                            <StatCard
+                              label="Inactive Accounts"
+                              value={aiInsights.inactiveAccounts.length}
+                              detail="No login in over 7 days, or never logged in"
+                              icon="○"
+                            />
+                          </section>
+                        )}
+
+                        {/* NEW: AI-Generated Analysis panel */}
+                        <div
+                          className="panel-heading"
+                          style={{ marginTop: "24px" }}
+                        >
+                          <div>
+                            <h2>AI-Generated Analysis</h2>
+                            <p>
+                              Recommendations based on your database statistics,
+                              generated by your local Ollama model.
+                            </p>
+                          </div>
+
+                          <button
+                            type="button"
+                            className="primary-button"
+                            onClick={loadAIAnalysis}
+                            disabled={aiAnalysisLoading}
+                          >
+                            {aiAnalysisLoading
+                              ? "Generating..."
+                              : "Generate AI Analysis"}
+                          </button>
+                        </div>
+
+                        {aiAnalysisError && (
+                          <p className="form-error">{aiAnalysisError}</p>
+                        )}
+
+                        {aiAnalysisStatistics && (
+                          <section className="stats-grid">
+                            <StatCard
+                              label="Top Payers"
+                              value={aiAnalysisStatistics.topPayerCount}
+                              detail="Customers with recorded payments"
+                              icon="✓"
+                            />
+
+                            <StatCard
+                              label="Overdue Debts"
+                              value={aiAnalysisStatistics.overdueDebtCount}
+                              detail={`Remaining balance: ${money(aiAnalysisStatistics.overdueBalanceTotal)}`}
+                              icon="!"
+                            />
+
+                            <StatCard
+                              label="Unpaid for 7+ Days"
+                              value={aiAnalysisStatistics.oldUnpaidDebtCount}
+                              detail={`Remaining balance: ${money(aiAnalysisStatistics.oldUnpaidBalanceTotal)}`}
+                              icon="◷"
+                            />
+
+                            <StatCard
+                              label="Inactive Accounts"
+                              value={aiAnalysisStatistics.inactiveAccountCount}
+                              detail="Active accounts with no login in over 7 days, or never logged in"
+                              icon="○"
+                            />
+                          </section>
+                        )}
+
+                        {aiAnalysisLoading ? (
+                          <p className="empty-state">
+                            The AI is analyzing the statistics. This may take a
+                            little while.
+                          </p>
+                        ) : aiAnalysis ? (
+                          <div
+                            style={{
+                              whiteSpace: "pre-wrap",
+                              lineHeight: 1.7,
+                              overflowWrap: "anywhere",
+                              padding: "16px",
+                              borderRadius: "8px",
+                              background: "var(--surface, #f5f5f5)",
+                            }}
+                          >
+                            {aiAnalysis}
+                          </div>
+                        ) : (
+                          <p className="empty-state">
+                            Click "Generate AI Analysis" to receive
+                            recommendations.
+                          </p>
+                        )}
+                      </section>
+                    </>
+                  )}
 
                   <section className="panel">
                     <div className="panel-heading">
