@@ -78,7 +78,6 @@ const isValidAddress = (value) =>
   typeof value === "string" && /^[a-zA-ZÀ-ÿ0-9\s,.'/]*$/.test(value);
 
 // Middleware
-// Middleware
 const allowedOrigins = [
   "http://localhost:5173",
   process.env.FRONTEND_URL,
@@ -2145,135 +2144,171 @@ app.delete(
   },
 );
 
+/* Shared helper: builds the debt insights used by BOTH
+   /api/admin/ai-insights and /api/admin/ai-analysis */
+async function getInsights(user) {
+  const scope = [user.role, user.userId];
+
+  const [
+    topPayers,
+    topPayerTotal,
+    overdueDebts,
+    oldUnpaidDebts,
+    inactiveAccounts,
+  ] = await Promise.all([
+    // Top 5 payers (for display)
+    pool.query(
+      `
+      SELECT
+        c.customer_id,
+        c.first_name,
+        c.last_name,
+        COALESCE(SUM(p.amount), 0) AS total_paid
+      FROM customers c
+      JOIN debts d ON d.customer_id = c.customer_id
+      JOIN payments p ON p.debt_id = d.debt_id
+      WHERE (
+        $1::text = 'admin'
+        OR EXISTS (
+          SELECT 1
+          FROM staff_assignments sa
+          WHERE sa.staff_user_id = $2
+            AND sa.customer_id = c.customer_id
+        )
+      )
+      GROUP BY c.customer_id, c.first_name, c.last_name
+      ORDER BY SUM(p.amount) DESC
+      LIMIT 5
+      `,
+      scope,
+    ),
+
+    // TRUE total number of customers with recorded payments
+    pool.query(
+      `
+      SELECT COUNT(DISTINCT d.customer_id)::int AS total
+      FROM payments p
+      JOIN debts d ON d.debt_id = p.debt_id
+      WHERE (
+        $1::text = 'admin'
+        OR EXISTS (
+          SELECT 1
+          FROM staff_assignments sa
+          WHERE sa.staff_user_id = $2
+            AND sa.customer_id = d.customer_id
+        )
+      )
+      `,
+      scope,
+    ),
+
+    // Overdue debts with remaining balance
+    pool.query(
+      `
+      SELECT
+        d.debt_id,
+        d.customer_id,
+        c.first_name,
+        c.last_name,
+        d.description,
+        d.amount,
+        d.due_date,
+        COALESCE(SUM(p.amount), 0) AS total_paid,
+        d.amount - COALESCE(SUM(p.amount), 0) AS remaining_balance
+      FROM debts d
+      JOIN customers c ON c.customer_id = d.customer_id
+      LEFT JOIN payments p ON p.debt_id = d.debt_id
+      WHERE d.due_date < CURRENT_DATE
+        AND (
+          $1::text = 'admin'
+          OR EXISTS (
+            SELECT 1
+            FROM staff_assignments sa
+            WHERE sa.staff_user_id = $2
+              AND sa.customer_id = d.customer_id
+          )
+        )
+      GROUP BY d.debt_id, c.customer_id, c.first_name, c.last_name
+      HAVING d.amount - COALESCE(SUM(p.amount), 0) > 0
+      ORDER BY d.due_date ASC
+      `,
+      scope,
+    ),
+
+    // Debts older than 7 days that still have a balance
+    pool.query(
+      `
+      SELECT
+        d.debt_id,
+        d.customer_id,
+        c.first_name,
+        c.last_name,
+        d.description,
+        d.debt_date,
+        d.amount,
+        COALESCE(SUM(p.amount), 0) AS total_paid,
+        d.amount - COALESCE(SUM(p.amount), 0) AS remaining_balance
+      FROM debts d
+      JOIN customers c ON c.customer_id = d.customer_id
+      LEFT JOIN payments p ON p.debt_id = d.debt_id
+      WHERE d.debt_date < CURRENT_DATE - INTERVAL '7 days'
+        AND (
+          $1::text = 'admin'
+          OR EXISTS (
+            SELECT 1
+            FROM staff_assignments sa
+            WHERE sa.staff_user_id = $2
+              AND sa.customer_id = d.customer_id
+          )
+        )
+      GROUP BY d.debt_id, c.customer_id, c.first_name, c.last_name
+      HAVING d.amount - COALESCE(SUM(p.amount), 0) > 0
+      ORDER BY d.debt_date ASC
+      `,
+      scope,
+    ),
+
+    // Inactive accounts (admin only)
+    user.role === "admin"
+      ? pool.query(`
+          SELECT
+            user_id,
+            username,
+            role,
+            last_login_at,
+            created_at
+          FROM users
+          WHERE is_active = TRUE
+            AND (
+              last_login_at < CURRENT_TIMESTAMP - INTERVAL '7 days'
+              OR last_login_at IS NULL
+            )
+          ORDER BY last_login_at ASC NULLS FIRST
+        `)
+      : Promise.resolve({ rows: [] }),
+  ]);
+
+  return {
+    topPayers: topPayers.rows,
+    topPayerTotal: topPayerTotal.rows[0].total,
+    overdueDebts: overdueDebts.rows,
+    unpaidOverSevenDays: oldUnpaidDebts.rows,
+    inactiveAccounts: inactiveAccounts.rows,
+  };
+}
+
+/* GET: AI insights (statistics cards) */
 app.get(
   "/api/admin/ai-insights",
   authenticateToken,
   authorizeRoles("admin", "staff"),
   async (req, res) => {
     try {
-      const [topPayers, overdueDebts, oldUnpaidDebts, inactiveAccounts] =
-        await Promise.all([
-          pool.query(
-            `
-    SELECT
-      c.customer_id,
-      c.first_name,
-      c.last_name,
-      COALESCE(SUM(p.amount), 0) AS total_paid
-    FROM customers c
-    JOIN debts d ON d.customer_id = c.customer_id
-    JOIN payments p ON p.debt_id = d.debt_id
-    WHERE (
-      $1::text = 'admin'
-      OR EXISTS (
-        SELECT 1
-        FROM staff_assignments sa
-        WHERE sa.staff_user_id = $2
-          AND sa.customer_id = c.customer_id
-      )
-    )
-    GROUP BY c.customer_id, c.first_name, c.last_name
-    ORDER BY SUM(p.amount) DESC
-    LIMIT 5
-  `,
-            [req.user.role, req.user.userId],
-          ),
-
-          pool.query(
-            `
-            SELECT
-              d.debt_id,
-              d.customer_id,
-              c.first_name,
-              c.last_name,
-              d.description,
-              d.amount,
-              d.due_date,
-              COALESCE(SUM(p.amount), 0) AS total_paid,
-              d.amount - COALESCE(SUM(p.amount), 0)
-                AS remaining_balance
-            FROM debts d
-            JOIN customers c ON c.customer_id = d.customer_id
-            LEFT JOIN payments p ON p.debt_id = d.debt_id
-            WHERE d.due_date < CURRENT_DATE
-  AND (
-    $1::text = 'admin'
-    OR EXISTS (
-      SELECT 1
-      FROM staff_assignments sa
-      WHERE sa.staff_user_id = $2
-        AND sa.customer_id = d.customer_id
-    )
-  )
-            GROUP BY
-              d.debt_id, c.customer_id,
-              c.first_name, c.last_name
-            HAVING d.amount - COALESCE(SUM(p.amount), 0) > 0
-            ORDER BY d.due_date ASC
-                    `,
-            [req.user.role, req.user.userId],
-          ),
-
-          pool.query(
-            `
-            SELECT
-              d.debt_id,
-              d.customer_id,
-              c.first_name,
-              c.last_name,
-              d.description,
-              d.debt_date,
-              d.amount,
-              COALESCE(SUM(p.amount), 0) AS total_paid,
-              d.amount - COALESCE(SUM(p.amount), 0)
-                AS remaining_balance
-            FROM debts d
-            JOIN customers c ON c.customer_id = d.customer_id
-            LEFT JOIN payments p ON p.debt_id = d.debt_id
-            WHERE d.debt_date < CURRENT_DATE - INTERVAL '7 days'
-  AND (
-    $1::text = 'admin'
-    OR EXISTS (
-      SELECT 1
-      FROM staff_assignments sa
-      WHERE sa.staff_user_id = $2
-        AND sa.customer_id = d.customer_id
-    )
-  )
-            GROUP BY
-              d.debt_id, c.customer_id,
-              c.first_name, c.last_name
-            HAVING d.amount - COALESCE(SUM(p.amount), 0) > 0
-            ORDER BY d.debt_date ASC
-                    `,
-            [req.user.role, req.user.userId],
-          ),
-
-          req.user.role === "admin"
-            ? pool.query(`
-                SELECT
-                  user_id,
-                  username,
-                  role,
-                  last_login_at,
-                  created_at
-                FROM users
-                WHERE is_active = TRUE
-                  AND (
-                    last_login_at < CURRENT_TIMESTAMP - INTERVAL '7 days'
-                    OR last_login_at IS NULL
-                  )
-                ORDER BY last_login_at ASC NULLS FIRST
-              `)
-            : Promise.resolve({ rows: [] }),
-        ]);
+      const insights = await getInsights(req.user);
 
       res.json({
         generatedAt: new Date().toISOString(),
-        topPayers: topPayers.rows,
-        overdueDebts: overdueDebts.rows,
-        unpaidOverSevenDays: oldUnpaidDebts.rows,
-        inactiveAccounts: inactiveAccounts.rows,
+        ...insights,
       });
     } catch (error) {
       console.error("AI insights error:", error);
@@ -2291,26 +2326,14 @@ app.get(
   authorizeRoles("admin", "staff"),
   async (req, res) => {
     try {
-      // Retrieve verified statistics from the existing insights endpoint.
-      const insightsResponse = await fetch(
-        `http://localhost:${PORT}/api/admin/ai-insights`,
-        {
-          headers: {
-            Authorization: req.headers.authorization,
-          },
-        },
-      );
-
-      if (!insightsResponse.ok) {
-        throw new Error("Failed to retrieve database insights.");
-      }
-
-      const insights = await insightsResponse.json();
+      // Read the verified statistics directly from the database,
+      // using the same function as /api/admin/ai-insights.
+      const insights = await getInsights(req.user);
 
       // Send aggregate statistics only. Exclude customer names,
       // usernames, and individual transaction details.
       const summary = {
-        topPayerCount: insights.topPayers.length,
+        topPayerCount: insights.topPayerTotal,
 
         overdueDebtCount: insights.overdueDebts.length,
         overdueBalanceTotal: insights.overdueDebts.reduce(
@@ -2330,21 +2353,27 @@ app.get(
       // Build reliable fallback recommendations from verified statistics.
       const recommendations = [];
 
+      const peso = (n) =>
+        new Intl.NumberFormat("en-PH", {
+          style: "currency",
+          currency: "PHP",
+        }).format(n);
+
       if (summary.overdueDebtCount > 0) {
         recommendations.push(
-          "Review overdue debts and verify their remaining balances before following up.",
+          `Review ${summary.overdueDebtCount} overdue debt(s) with a combined remaining balance of ${peso(summary.overdueBalanceTotal)} before following up.`,
         );
       }
 
       if (summary.oldUnpaidDebtCount > 0) {
         recommendations.push(
-          "Review debts that have remained unpaid for more than seven days and verify their current balances.",
+          `Review ${summary.oldUnpaidDebtCount} debt(s) unpaid for more than seven days, with a combined remaining balance of ${peso(summary.oldUnpaidBalanceTotal)}.`,
         );
       }
 
       if (summary.inactiveAccountCount > 0) {
         recommendations.push(
-          "Review inactive account activity and determine whether any follow-up is needed.",
+          `Review ${summary.inactiveAccountCount} inactive account(s) and determine whether any follow-up is needed.`,
         );
       }
 
@@ -2362,32 +2391,32 @@ app.get(
       if (ai) {
         try {
           const prompt = `
-You are an administrative recommendation assistant for a debt-tracking application in the Philippines.
+  You are an administrative recommendation assistant for a debt-tracking application in the Philippines.
 
-Use ONLY the verified statistics and permitted actions below.
-Do not invent facts, reasons, fees, penalties, customer behavior, or payment histories.
-Do not claim that any customer owes money merely because they are a top payer.
-Do not recommend actions for categories whose counts are zero.
-Do not output counts or monetary amounts.
-Provide short, practical recommendations for an administrator.
-Use numbered recommendations and no heading.
+  Use ONLY the verified statistics and permitted actions below.
+  Do not invent facts, reasons, fees, penalties, customer behavior, or payment histories.
+  Do not claim that any customer owes money merely because they are a top payer.
+  Do not recommend actions for categories whose counts are zero.
+  You may quote the verified counts and peso amounts exactly as given. Never change, round, or estimate them.
+  Provide short, practical recommendations for an administrator.
+  Use numbered recommendations and no heading.
 
-Metric meanings:
-- topPayerCount: Customers who have recorded payments. This does not mean they owe money.
-- overdueDebtCount: Debts past their due date that still have a remaining balance.
-- oldUnpaidDebtCount: Debts dated more than seven days ago that still have a remaining balance.
-- inactiveAccountCount: Active accounts that have not logged in for more than seven days or have never logged in.
+  Metric meanings:
+  - topPayerCount: Customers who have recorded payments. This does not mean they owe money.
+  - overdueDebtCount: Debts past their due date that still have a remaining balance.
+  - oldUnpaidDebtCount: Debts dated more than seven days ago that still have a remaining balance.
+  - inactiveAccountCount: Active accounts that have not logged in for more than seven days or have never logged in.
 
-Verified statistics:
-${JSON.stringify(summary, null, 2)}
+  Verified statistics:
+  ${JSON.stringify(summary, null, 2)}
 
-Permitted actions:
-${recommendations.length > 0 ? recommendations.join("\n") : "No additional action is indicated by these statistics."}
+  Permitted actions:
+  ${recommendations.length > 0 ? recommendations.join("\n") : "No additional action is indicated by these statistics."}
 
-Rewrite the permitted actions clearly and professionally. Do not add new actions or claims.
-End with this exact sentence:
-These recommendations are suggestions based only on the available statistics.
-`;
+  Rewrite the permitted actions clearly and professionally. Do not add new actions or claims.
+  End with this exact sentence:
+  These recommendations are suggestions based only on the available statistics.
+  `;
 
           const response = await ai.models.generateContent({
             model: GEMINI_MODEL,
@@ -2416,7 +2445,12 @@ These recommendations are suggestions based only on the available statistics.
         statistics: summary,
       });
     } catch (error) {
-      console.error("AI analysis error:", error.message);
+      console.error("AI analysis error:", {
+        message: error.message,
+        cause: error.cause?.message,
+        code: error.cause?.code,
+        stack: error.stack,
+      });
 
       return res.status(500).json({
         success: false,

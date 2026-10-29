@@ -49,6 +49,7 @@ function App() {
 
   const [aiInsights, setAiInsights] = useState({
     topPayers: [],
+    topPayerTotal: 0,
     overdueDebts: [],
     unpaidOverSevenDays: [],
     inactiveAccounts: [],
@@ -559,10 +560,6 @@ function App() {
       loadManagedUsers();
       loadStaffAssignments();
     }
-
-    if (["admin", "staff"].includes(user.role)) {
-      loadAIInsights();
-    }
   }, [token, user]);
 
   useEffect(() => {
@@ -609,6 +606,11 @@ function App() {
       }));
 
       setPayments(formattedPayments);
+
+      // Keep the AI Insights cards in sync with the latest data.
+      if (["admin", "staff"].includes(user.role)) {
+        loadAIInsights();
+      }
     } catch (error) {
       console.error("Failed to load payments:", error);
       notify(`Failed to load payment history: ${error.message}`);
@@ -1328,7 +1330,7 @@ function App() {
                           <section className="stats-grid">
                             <StatCard
                               label="Top Payers"
-                              value={aiInsights.topPayers.length}
+                              value={aiInsights.topPayerTotal}
                               detail="Customers with recorded payments"
                               icon="✓"
                             />
@@ -1372,8 +1374,10 @@ function App() {
                           <button
                             type="button"
                             className="primary-button"
-                            onClick={loadAIAnalysis}
-                            disabled={aiAnalysisLoading}
+                            onClick={() =>
+                              Promise.all([loadAIInsights(), loadAIAnalysis()])
+                            }
+                            disabled={aiAnalysisLoading || aiInsightsLoading}
                           >
                             {aiAnalysisLoading
                               ? "Generating..."
@@ -1558,8 +1562,9 @@ function App() {
                       </form>
 
                       <p className="stat-detail">
-                        This chatbot is read-only. It uses aggregate statistics
-                        and cannot modify database records.
+                        This chatbot is read-only. It answers from your
+                        permitted customer, debt, and payment data and cannot
+                        modify database records.
                       </p>
                     </section>
                   )}
