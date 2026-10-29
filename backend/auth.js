@@ -43,7 +43,7 @@ async function authenticateToken(req, res, next) {
       error.name === "TokenExpiredError" ||
       error.name === "NotBeforeError"
     ) {
-      return res.status(403).json({
+      return res.status(401).json({
         message: "Invalid or expired token.",
       });
     }
