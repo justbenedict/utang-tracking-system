@@ -725,3 +725,70 @@ tbody tr:last-child td {
   font-size: 14px;
   text-align: left;
 }
+
+/* Loading overlay (shown during save / edit / delete) */
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(23, 59, 50, 0.55);
+  backdrop-filter: blur(2px);
+  cursor: wait;
+}
+
+.loading-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 320px;
+  padding: 30px 28px;
+  border-radius: 14px;
+  background: #fff;
+  text-align: center;
+  box-shadow: 0 12px 40px rgba(23, 59, 50, 0.25);
+}
+
+.loading-box p {
+  margin: 10px 0 0;
+  color: #173b32;
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.loading-box span {
+  color: #7a8e84;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.loading-spinner {
+  width: 42px;
+  height: 42px;
+  border: 4px solid #e3f2e7;
+  border-top-color: #245b3d;
+  border-radius: 50%;
+  animation: loading-spin 0.8s linear infinite;
+}
+
+@keyframes loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-spinner {
+    animation-duration: 2s;
+  }
+}
+
+@media print {
+  .loading-overlay {
+    display: none !important;
+  }
+}

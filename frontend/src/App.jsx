@@ -68,6 +68,10 @@ function App() {
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState("");
 
+  // Text shown on the full-screen loading overlay.
+  // An empty string means the overlay is hidden.
+  const [busyMessage, setBusyMessage] = useState("");
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoginError("");
@@ -132,6 +136,7 @@ function App() {
     setUsersLoading(false);
     setAssignmentsLoading(false);
     setUserManagementLoading(false);
+    setBusyMessage("");
   };
 
   const filteredReportDebts = debts.filter((debt) => {
@@ -680,6 +685,10 @@ function App() {
 
     const isEditing = editingCustomer !== null;
 
+    setBusyMessage(
+      isEditing ? "Updating customer details..." : "Registering customer...",
+    );
+
     try {
       const response = await fetch(
         isEditing
@@ -732,9 +741,10 @@ function App() {
       );
     } catch (error) {
       notify(`Could not save customer: ${error.message}`);
+    } finally {
+      setBusyMessage("");
     }
   }
-
   function startEditingCustomer(customer) {
     setEditingCustomer(customer);
     setPage("Customers");
@@ -750,6 +760,8 @@ function App() {
     if (!confirmed) {
       return;
     }
+
+    setBusyMessage("Deleting customer...");
 
     try {
       const response = await fetch(`${API_URL}/customers/${customer.id}`, {
@@ -775,6 +787,8 @@ function App() {
     } catch (error) {
       console.error("Delete customer error:", error);
       notify(error.message || "Failed to delete customer.");
+    } finally {
+      setBusyMessage("");
     }
   }
 
@@ -803,6 +817,10 @@ function App() {
     }
 
     const isEditing = editingDebt !== null;
+
+    setBusyMessage(
+      isEditing ? "Updating debt record..." : "Saving debt record...",
+    );
 
     try {
       const response = await fetch(
@@ -841,6 +859,8 @@ function App() {
       );
     } catch (error) {
       notify(`Could not save debt: ${error.message}`);
+    } finally {
+      setBusyMessage("");
     }
   }
 
@@ -859,6 +879,8 @@ function App() {
     if (!confirmed) {
       return;
     }
+
+    setBusyMessage("Deleting debt record...");
 
     try {
       const response = await fetch(`${API_URL}/debts/${debt.id}`, {
@@ -884,6 +906,8 @@ function App() {
     } catch (error) {
       console.error("Delete debt error:", error);
       notify(error.message || "Failed to delete debt.");
+    } finally {
+      setBusyMessage("");
     }
   }
 
@@ -902,6 +926,8 @@ function App() {
     if (!confirmed) {
       return;
     }
+
+    setBusyMessage("Deleting payment...");
 
     try {
       const response = await fetch(`${API_URL}/payments/${payment.id}`, {
@@ -927,6 +953,8 @@ function App() {
     } catch (error) {
       console.error("Delete payment error:", error);
       notify(error.message || "Failed to delete payment.");
+    } finally {
+      setBusyMessage("");
     }
   }
 
@@ -960,6 +988,8 @@ function App() {
       notify("Enter a valid payment not exceeding the remaining balance.");
       return;
     }
+
+    setBusyMessage(isEditing ? "Updating payment..." : "Recording payment...");
 
     try {
       const response = await fetch(
@@ -1006,6 +1036,8 @@ function App() {
       notify(
         `Could not ${isEditing ? "update" : "record"} payment: ${error.message}`,
       );
+    } finally {
+      setBusyMessage("");
     }
   }
 
@@ -1113,6 +1145,8 @@ function App() {
 
   return (
     <div className="app-shell">
+      {busyMessage && <LoadingOverlay message={busyMessage} />}
+
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">₱</div>
@@ -2680,6 +2714,23 @@ function DebtTable({ debts, onEdit, onDelete, today }) {
           {debts.length === 0 && <EmptyRow columns={showActions ? 7 : 6} />}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function LoadingOverlay({ message }) {
+  return (
+    <div
+      className="loading-overlay"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <div className="loading-box">
+        <div className="loading-spinner" aria-hidden="true" />
+        <p>{message}</p>
+        <span>Please wait. Do not close or refresh this page.</span>
+      </div>
     </div>
   );
 }
