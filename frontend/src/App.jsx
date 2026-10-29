@@ -1268,11 +1268,6 @@ function App() {
                 <>
                   <section className="stats-grid">
                     <StatCard
-                      label="Total Debt"
-                      value={money(debts.reduce((s, d) => s + d.amount, 0))}
-                      icon="▤"
-                    />
-                    <StatCard
                       label="Outstanding Balance"
                       value={money(outstanding)}
                       icon="◷"
